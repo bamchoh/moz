@@ -49,7 +49,7 @@ moz moz.toml
 - [x] `moz validate` コマンド (設定検証、単一の検証経路)
 - [x] 型付き名前付き変数 (`[[variable]]`, 変更ログ)
 - [x] スクリプト (JavaScript, 64bit は BigInt で正確)
-- [ ] Modbus RTU (シリアル)
+- [x] Modbus RTU (シリアル、仮想 COM 無しのメモリ pipe テスト込み)
 - [ ] クライアント (マスタ)
 - [ ] OPC UA (in-process)
 

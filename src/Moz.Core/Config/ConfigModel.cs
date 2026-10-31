@@ -175,6 +175,32 @@ public sealed class ServerConfig
     [TomlPropertyName("unit_ids")]
     public List<int>? UnitIds { get; set; }
 
+    /// <summary>Serial port name for serial protocols (REQUIRED for modbus-rtu).
+    /// Windows "COM10", Linux "/dev/ttyUSB0". Ignored-and-rejected on non-serial protocols.</summary>
+    [TomlPropertyName("serial_port")]
+    public string? SerialPort { get; set; }
+
+    /// <summary>Baud rate. Default 9600 (Modbus serial default).</summary>
+    [TomlPropertyName("baud")]
+    public int Baud { get; set; } = 9600;
+
+    /// <summary>none | even | odd. Default even (Modbus serial default 8E1).</summary>
+    [TomlPropertyName("parity")]
+    public string Parity { get; set; } = "even";
+
+    /// <summary>Data bits (7..8). Default 8.</summary>
+    [TomlPropertyName("data_bits")]
+    public int DataBits { get; set; } = 8;
+
+    /// <summary>Stop bits (1..2). Default 1.</summary>
+    [TomlPropertyName("stop_bits")]
+    public int StopBits { get; set; } = 1;
+
+    /// <summary>Inter-frame idle gap (ms) that ends an RTU frame; 3.5 chars are ~4ms at 9600.
+    /// Default 50.</summary>
+    [TomlPropertyName("idle_gap_ms")]
+    public int IdleGapMs { get; set; } = 50;
+
     [TomlExtensionData]
     public IDictionary<string, object?>? Extra { get; set; }
 }

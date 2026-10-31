@@ -1,6 +1,6 @@
-# Modbus 実装仕様 (フェーズ 1: Modbus TCP)
+# Modbus 実装仕様 (フェーズ 1: Modbus TCP / フェーズ 5: Modbus RTU)
 
-この文書は `Moz.Core/Modbus/` のコーデック実装の仕様であり、`tests/Moz.Tests/ModbusPduTests.cs` がこの表をエンコードしている。両者を同時に更新すること。
+この文書は `Moz.Core/Modbus/` のコーデック実装の仕様であり、`tests/Moz.Tests/ModbusPduTests.cs`（PDU）と `RtuTests.cs`（RTU 層）がこの表をエンコードしている。両者を同時に更新すること。
 
 ## 用語
 
@@ -77,3 +77,16 @@ warn: moz.server.sim-a[0] conn=c1 remote=127.0.0.1:53124 err=bad MBAP header (pr
 - **FC 0x07 (診断) 等、上表以外の FC は例外 01 を返す**（実装しないことをエラーで明示）
 - broadcast unit id (0/255) への特別扱いはしない（通常の Unit ID として 247 との違いを設けない。unit_ids で制御）
 - TCP 上の複数要求パイプライン (1 接続で複数 tid の同時要求) は**逐次処理**する（並行処理しない。シンプルさ優先。将来的に必要なら並列化）
+
+## Modbus RTU (シリアル) — フェーズ 5
+
+フレーミング: `[slave address(1)] [PDU] [CRC16(2)]`。CRC16 は 0xA001、初期値 0xFFFF、LSB が先に伝送される（検証ベクタ: `010300000001` → `840A`、Modicon 例 `1103006B0003` → `7687`）。
+
+**フレーム検出**（シリアルには境界がないので）:
+
+- 1 バイトずつ蓄積し、FC から導出した要求長 + CRC が成立した時点で応答する（FC01-06 は 8 バイト、FC0F/10 は 8 + byteCount）
+- **アイドル間隔（既定 50ms、`server.idle_gap_ms` で設定。9600bps での 3.5 文字 ≈ 4ms）でバッファを捨てる**。理由: CRC不一致・未知 FC・フレーム断片はすべて「成立しないフレーム」として捨てられ、次のフレーム待ちに戻る
+- **CRC 不一致 → 無応答**（仕様どおり。マスタはタイムアウトする）
+- unserved な slave address → 無応答（TCP の unit_ids と同じ規約）。設定した `unit_ids` に含まれないアドレスは答えない
+- サーバは生 `Stream` を受け取る。シリアルポートを開く（System.IO.Ports）のは CLI 側であり、コアは配管を知らない。テストはメモリ内 pipe で実施（仮想 COM 不要）
+- TCP と同一の PDU コーデック・例外コード・上限を使う。unit id は MBAP ではなく ADU から来る

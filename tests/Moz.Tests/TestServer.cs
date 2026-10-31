@@ -99,3 +99,28 @@ internal sealed class CapturingProvider : ILoggerProvider
             entries.Add(new Captured(logLevel, eventId.Id, formatter(state, exception)));
     }
 }
+
+/// <summary>Two connected in-memory streams standing in for a serial bus (test only).</summary>
+internal sealed class SerialBus : IAsyncDisposable
+{
+    private readonly PipeStream _master;
+    private readonly PipeStream _slave;
+
+    public SerialBus()
+    {
+        (_master, _slave) = PipeStream.CreatePair();
+        MasterStream = _master;
+        SlaveStream = _slave;
+    }
+
+    public PipeStream MasterStream { get; }
+
+    public PipeStream SlaveStream { get; }
+
+    public ValueTask DisposeAsync()
+    {
+        _master.Dispose();
+        _slave.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

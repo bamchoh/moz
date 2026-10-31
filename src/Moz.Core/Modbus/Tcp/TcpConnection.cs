@@ -83,37 +83,13 @@ internal sealed class TcpConnection(
             await _stream.WriteAsync(_respFrame.AsMemory(0, Mbap.HeaderSize + outcome.Length), ct);
 
             logger.Request(connId, mbap.UnitId, _reqPdu[0],
-                GetRequestAddress(_reqPdu, pduLength), GetRequestQuantity(_reqPdu, pduLength),
+                RequestInfo.AddressOf(_reqPdu), RequestInfo.QuantityOf(_reqPdu),
                 outcome.ExceptionCode == 0 ? null : outcome.ExceptionCode);
         }
     }
 
     private bool UnitIdAllowed(byte unitId) =>
         unitIds is null || unitIds.Length == 0 || Array.IndexOf(unitIds, unitId) >= 0;
-
-    /// <summary>First address word for logging; 0 when the PDU is too short to have one.</summary>
-    private static ushort GetRequestAddress(ReadOnlySpan<byte> pdu, int pduLength) =>
-        pduLength >= 3 ? (ushort)((pdu[1] << 8) | pdu[2]) : (ushort)0;
-
-    /// <summary>Quantity for logging; single-write FCs report 1, unknown FCs 0.</summary>
-    private static ushort GetRequestQuantity(ReadOnlySpan<byte> pdu, int pduLength)
-    {
-        switch ((FunctionCode)pdu[0])
-        {
-            case FunctionCode.ReadCoils:
-            case FunctionCode.ReadDiscreteInputs:
-            case FunctionCode.ReadHoldingRegisters:
-            case FunctionCode.ReadInputRegisters:
-            case FunctionCode.WriteMultipleCoils:
-            case FunctionCode.WriteMultipleRegisters:
-                return pduLength >= 5 ? (ushort)((pdu[3] << 8) | pdu[4]) : (ushort)0;
-            case FunctionCode.WriteSingleCoil:
-            case FunctionCode.WriteSingleRegister:
-                return pduLength >= 5 ? (ushort)1 : (ushort)0;
-            default:
-                return 0;
-        }
-    }
 
     public void Dispose() => client.Dispose();
 }

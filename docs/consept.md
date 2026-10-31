@@ -63,6 +63,6 @@ karakuri（先代ツール）の反省を設計指針にしています:
 2. 仕様の強化 (`moz validate`、MBAP ポリシーマトリクスをテストで pin) ← **完了**
 3. 型付き名前付き変数 (`[[variable]]`、bool〜ulint、変更ログ) ← **完了**
 4. スクリプト (Jint, `plc` API, ULINT=BigInt) ← **完了**
-5. Modbus RTU (シリアル) ← **現在地**
-6. クライアント (マスタ)
+5. Modbus RTU (シリアル; Stream 汎用サーバ、メモリ pipe で結合テスト) ← **完了**
+6. クライアント (マスタ) ← **現在地**
 7. OPC UA (in-process C#)

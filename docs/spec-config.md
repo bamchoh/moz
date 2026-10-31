@@ -61,14 +61,30 @@ count  = 4           # 配列要素数 (省略: 1)
 ```toml
 [[server]]
 name      = "sim-a"   # 必須、一意
-protocol  = "modbus-tcp"  # 現行: "modbus-tcp" のみ
+protocol  = "modbus-tcp"  # 現行: "modbus-tcp" または "modbus-rtu"
 device    = "plc-a"   # 参照する device 名 (未宣言名はエラー)
-bind      = "127.0.0.1"  # 省略: 127.0.0.1
-port      = 50200     # 省略: 50200。0 は ephemeral (テスト/CI 用)
-unit_ids  = [1]       # 応答する Unit ID。省略/空 = 全 Unit ID に応答 (0..247)
+bind      = "127.0.0.1"  # TCP。省略: 127.0.0.1
+port      = 50200     # TCP。省略: 50200。0 は ephemeral (テスト/CI 用)
+unit_ids  = [1]       # 応答する Unit ID/スレーブアドレス。省略/空 = 全部に応答 (0..247)
 ```
 
-unit_ids を設定した場合、リストに無い Unit ID への要求は**無応答**（マスタ側はタイムアウトする）。
+### シリアル (modbus-rtu) 用のキー
+
+```toml
+[[server]]
+name = "rtu-a"
+protocol = "modbus-rtu"
+device = "plc-a"
+serial_port = "COM10"   # 必須 (modbus-rtu のとき)。"/dev/ttyUSB0" 等も可
+baud       = 9600       # 省略: 9600 (110..4000000)
+parity     = "even"     # none|even|odd。省略: even (Modbus 規定の 8E1)
+data_bits  = 8          # 省略: 8 (7..8)
+stop_bits  = 1          # 省略: 1 (1..2)
+idle_gap_ms = 50        # RTU フレームのアイドル区切り (省略: 50; 9600bps で 3.5 文字 ≈ 4ms)
+```
+
+- `serial_port` は modbus-rtu では必須、それ以外の protocol では設定禁止
+- unserved なスレーブアドレスには無応答 (マスタ側はタイムアウト)。詳細は docs/spec-modbus.md の RTU 節
 
 ## [[script]] — 周期スクリプト
 
@@ -88,11 +104,16 @@ interval_ms = 500       # 100..3600000 (省略: 1000)
 |---|---|
 | device 内の点数 | 1 .. 65536 |
 | server.port | 0 .. 65535 |
+| server.baud | 110 .. 4000000 |
+| server.data_bits | 7 .. 8 |
+| server.stop_bits | 1 .. 2 |
+| server.idle_gap_ms | 1 .. 1000 |
 | server.unit_ids[i] | 0 .. 247 |
 | script.interval_ms | 100 .. 3600000 |
 | log.level | trace/debug/info/warn/error |
 | log.format | text/json |
-| server.protocol | modbus-tcp (他はエラー) |
+| server.parity | none/even/odd |
+| server.protocol | modbus-tcp / modbus-rtu (他はエラー) |
 
 - device 名・server 名は互いに重複禁止（種類が違えば可）
 - `[[device]]` が 0 件でも `[[server]]` が 0 件でも起動する（何も動かないだけでエラーではない）

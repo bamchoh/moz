@@ -5,6 +5,7 @@ using Moz;
 using Moz.Config;
 using Moz.Devices;
 using Moz.Logging;
+using Moz.Modbus.Rtu;
 using Moz.Modbus.Tcp;
 using Moz.Scripts;
 
@@ -155,6 +156,13 @@ public static class CliApp
                     device,
                     s.UnitIds is { Count: > 0 } ? s.UnitIds.Select(u => (ushort)u).ToArray() : null,
                     loggerFactory.CreateLogger($"moz.server.{s.Name}")),
+                "modbus-rtu" => new RtuServer(
+                    s.Name,
+                    OpenSerialPort(s),
+                    device,
+                    s.UnitIds is { Count: > 0 } ? s.UnitIds.Select(u => (ushort)u).ToArray() : null,
+                    s.IdleGapMs,
+                    loggerFactory.CreateLogger($"moz.server.{s.Name}")),
                 _ => throw new InvalidOperationException(
                     $"unknown protocol \"{s.Protocol}\" (already rejected by config validation)"),
             });
@@ -188,6 +196,28 @@ public static class CliApp
         logger.LogInformation("all runners stopped");
         return 0;
     }
+
+    /// <summary>Open the serial port backing an RTU runner; the Core layer only ever sees the stream.</summary>
+    private static Stream OpenSerialPort(ServerConfig s)
+    {
+        var port = new System.IO.Ports.SerialPort(
+            s.SerialPort!, s.Baud, ToParity(s.Parity), s.DataBits,
+            (System.IO.Ports.StopBits)s.StopBits)
+        {
+            ReadTimeout = System.Threading.Timeout.Infinite, // the RTU loop owns timing
+            WriteTimeout = 1000,
+        };
+        port.Open();
+        return port.BaseStream;
+    }
+
+    private static System.IO.Ports.Parity ToParity(string parity) => parity switch
+    {
+        "none" => System.IO.Ports.Parity.None,
+        "even" => System.IO.Ports.Parity.Even,
+        "odd" => System.IO.Ports.Parity.Odd,
+        _ => throw new ArgumentException($"invalid parity \"{parity}\" (already rejected by config validation)"),
+    };
 
     private static LogLevel ToLevel(string level) => level switch
     {

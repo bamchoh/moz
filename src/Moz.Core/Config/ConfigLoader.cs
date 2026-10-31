@@ -76,7 +76,7 @@ public static class ConfigLoader
 
     private static readonly string[] LogLevels = ["trace", "debug", "info", "warn", "error"];
     private static readonly string[] LogFormats = ["text", "json"];
-    private static readonly string[] Protocols = ["modbus-tcp"];
+    private static readonly string[] Protocols = ["modbus-tcp", "modbus-rtu"];
 
     private static void Validate(MozConfig config, string path, List<ConfigError> errors)
     {
@@ -142,6 +142,25 @@ public static class ConfigLoader
                     }
                 }
             }
+
+            // serial-protocol wiring (phase 5)
+            bool serialProtocol = server.Protocol == "modbus-rtu";
+            if (serialProtocol)
+            {
+                Require(server.SerialPort ?? "", "server.serial_port", path, errors,
+                    $"[server \"{server.Name}\"] (required for modbus-rtu)");
+            }
+            else if (server.SerialPort is not null)
+            {
+                errors.Add(new ConfigError(path,
+                    $"server.serial_port is only valid for serial protocols (modbus-rtu), set on \"{server.Name}\" ({server.Protocol})"));
+            }
+            CheckRange(server.Baud, "server.baud", 110, 4_000_000, path, errors);
+            CheckChoice(server.Parity, ["none", "even", "odd"], "server.parity", path, errors,
+                defaultIs: "even", context: $"[server \"{server.Name}\"]");
+            CheckRange(server.DataBits, "server.data_bits", 7, 8, path, errors);
+            CheckRange(server.StopBits, "server.stop_bits", 1, 2, path, errors);
+            CheckRange(server.IdleGapMs, "server.idle_gap_ms", 1, 1000, path, errors);
         }
 
         // duplicate names: devices and servers are separate namespaces,
