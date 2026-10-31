@@ -64,6 +64,20 @@ public static class ConfigLoader
         {
             server.Bind = string.IsNullOrWhiteSpace(server.Bind) ? "127.0.0.1" : server.Bind;
         }
+        foreach (var client in config.Client)
+        {
+            foreach (var poll in client.Poll)
+            {
+                poll.LocalKind ??= poll.Fc switch
+                {
+                    1 => "coil",
+                    2 => "discrete",
+                    3 => "holding",
+                    4 => "input",
+                    _ => null,
+                };
+            }
+        }
     }
 
     public static string DefaultConfigHint() =>
@@ -101,6 +115,7 @@ public static class ConfigLoader
 
         ValidateVariables(config, path, errors);
         CheckVariableOverlaps(config, path, errors);
+        ValidateClients(config, path, errors);
 
         foreach (var script in config.Script)
         {
@@ -111,6 +126,7 @@ public static class ConfigLoader
             CheckRange(script.IntervalMs, "script.interval_ms", 100, 3_600_000, path, errors);
         }
         CheckDuplicates(config.Script.Select(s => s.Name), "script", path, errors);
+        CheckDuplicates(config.Client.Select(c => c.Name), "client", path, errors);
 
         // script device references resolve
         var deviceNames = config.Device.Select(d => d.Name).ToHashSet(StringComparer.Ordinal);
@@ -308,6 +324,108 @@ public static class ConfigLoader
             case "real": parsed = VariableType.Real; return true;
             default: parsed = default; return false;
         }
+    }
+
+    // --- client (master) validation -----------------------------------------
+
+    private static bool TryLocalKind(string kind, out TableKind parsed)
+    {
+        switch (kind)
+        {
+            case "coil": parsed = TableKind.Coil; return true;
+            case "discrete": parsed = TableKind.DiscreteInput; return true;
+            case "holding": parsed = TableKind.HoldingRegister; return true;
+            case "input": parsed = TableKind.InputRegister; return true;
+            default: parsed = default; return false;
+        }
+    }
+
+    /// <summary>Per-client: name/device/remote_addr required, ranges, poll entries.</summary>
+    private static void ValidateClients(MozConfig config, string path, List<ConfigError> errors)
+    {
+        foreach (var client in config.Client)
+        {
+            var ctx = $"[[client]] \"{client.Name}\"";
+            Require(client.Name, "client.name", path, errors, ctx);
+            Require(client.Device, "client.device", path, errors, ctx);
+            Require(client.RemoteAddr, "client.remote_addr", path, errors, ctx);
+            CheckExtra(client.Extra, ctx, path, errors);
+            CheckRange(client.RemoteUnit, "client.remote_unit", 0, Modbus.ModbusLimits.UnitIdMax, path, errors);
+            CheckRange(client.IntervalMs, "client.interval_ms", 100, 3_600_000, path, errors);
+            CheckRange(client.TimeoutMs, "client.timeout_ms", 10, 600_000, path, errors);
+
+            if (client.RemoteAddr.Length > 0 && !TryParseRemoteAddr(client.RemoteAddr))
+            {
+                errors.Add(new ConfigError(path,
+                    $"client.remote_addr value \"{client.RemoteAddr}\" is invalid (host:port, port 1..65535) in {ctx}"));
+            }
+
+            foreach (var poll in client.Poll)
+            {
+                var pctx = $"[[client.poll]] on \"{client.Name}\"";
+                CheckExtra(poll.Extra, pctx, path, errors);
+                bool isBit = poll.Fc is 1 or 2;
+                if (poll.Fc is not (1 or 2 or 3 or 4))
+                {
+                    errors.Add(new ConfigError(path,
+                        $"poll.fc value {poll.Fc} is invalid (1..4, reads only) in {pctx}"));
+                }
+                else
+                {
+                    int max = isBit ? Modbus.ModbusLimits.ReadBitsMax : Modbus.ModbusLimits.ReadRegsMax;
+                    if (poll.Count < 1 || poll.Count > max)
+                    {
+                        errors.Add(new ConfigError(path,
+                            $"poll.count value {poll.Count} is out of range 1..{max} in {pctx}"));
+                    }
+                }
+                if (poll.RemoteOffset < 0 || poll.RemoteOffset > ushort.MaxValue)
+                {
+                    errors.Add(new ConfigError(path,
+                        $"poll.remote_offset value {poll.RemoteOffset} is out of range 0..65535 in {pctx}"));
+                }
+                if (poll.LocalOffset < 0 || poll.LocalOffset > ushort.MaxValue)
+                {
+                    errors.Add(new ConfigError(path,
+                        $"poll.local_offset value {poll.LocalOffset} is out of range 0..65535 in {pctx}"));
+                }
+                if (poll.LocalKind is { } kind && !TryLocalKind(kind, out var table))
+                {
+                    errors.Add(new ConfigError(path,
+                        $"poll.local_kind value \"{kind}\" is invalid (coil|discrete|holding|input) in {pctx}"));
+                }
+                else if (poll.LocalKind is { } kind2 && IsBitLocalKind(kind2) != isBit)
+                {
+                    errors.Add(new ConfigError(path, isBit
+                        ? $"bit fc {poll.Fc} requires a bit local kind (coil|discrete) in {pctx}"
+                        : $"word fc {poll.Fc} requires a word local kind (holding|input) in {pctx}"));
+                }
+            }
+        }
+
+        // device references resolve
+        var deviceNames = config.Device.Select(d => d.Name).ToHashSet(StringComparer.Ordinal);
+        foreach (var client in config.Client)
+        {
+            if (client.Device.Length > 0 && !deviceNames.Contains(client.Device))
+            {
+                errors.Add(new ConfigError(path,
+                    $"[client \"{client.Name}\"] references device \"{client.Device}\" which is not declared"));
+            }
+        }
+    }
+
+    private static bool IsBitLocalKind(string kind) => kind is "coil" or "discrete";
+
+    private static bool TryParseRemoteAddr(string addr)
+    {
+        // host:port (host may be an IP or hostname; IPv6 literals are v1-unsupported)
+        var sep = addr.LastIndexOf(':');
+        if (sep <= 0 || sep == addr.Length - 1)
+        {
+            return false;
+        }
+        return int.TryParse(addr[(sep + 1)..], out var port) && port >= 1 && port <= 65535;
     }
 
     private static void Require(string value, string key, string path, List<ConfigError> errors, string context)

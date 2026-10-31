@@ -9,9 +9,20 @@ name = "plc-a"
 holding = 1000
 coils = 1000
 
+[[device]]
+name = "plc-mirror"
+holding = 1000
+
 [[variable]]
 name = "temperature"
 device = "plc-a"
+kind = "holding"
+offset = 0
+type = "real"
+
+[[variable]]
+name = "temperature-mirror"
+device = "plc-mirror"
 kind = "holding"
 offset = 0
 type = "real"
@@ -28,6 +39,19 @@ name = "demo-counter"
 device = "plc-a"
 path = "scripts/counter.js"
 interval_ms = 500
+
+[[client]]
+name = "self-poll"
+device = "plc-mirror"
+remote_addr = "127.0.0.1:50200"
+remote_unit = 1
+interval_ms = 500
+
+[[client.poll]]
+fc = 3
+remote_offset = 0
+count = 2
+local_offset = 0
 
 [[server]]
 name = "sim-a"

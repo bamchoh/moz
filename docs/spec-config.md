@@ -86,6 +86,34 @@ idle_gap_ms = 50        # RTU フレームのアイドル区切り (省略: 50; 
 - `serial_port` は modbus-rtu では必須、それ以外の protocol では設定禁止
 - unserved なスレーブアドレスには無応答 (マスタ側はタイムアウト)。詳細は docs/spec-modbus.md の RTU 節
 
+## [[client]] — クライアント (マスタ): リモートスレーブのミラー
+
+moz が Modbus TCP マスタとして動作し、リモートスレーブを周期ポーリングして答えをローカル device にコピーする (フェーズ 6)。v1 は**読み取り専用**ミラー (リモート → ローカル)。
+
+```toml
+[[device]]
+name = "plc-mirror"
+
+[[client]]
+name        = "poll-plc1"
+device      = "plc-mirror"          # 鏡像の置き先 (必須、未宣言名はエラー)
+remote_addr = "192.168.0.10:502"    # host:port (必須; hostname も可)
+remote_unit = 1                   # 送信する Unit ID (省略: 1, 0..247)
+interval_ms = 1000                # ポーリング周期 (省略: 1000, 100..3600000)
+timeout_ms  = 5000                # 1 要求あたりのタイムアウト (省略: 5000, 10..600000)
+
+[[client.poll]]
+fc            = 3       # 読み取り FC: 1..4 (書き込み FC は対象外)
+remote_offset = 100     # リモートの開始アドレス
+count         = 10      # 読み取り点数 (ワード FC: 1..125, ビット FC: 1..2000)
+local_kind    = "holding"  # 省略可: fc から推測 (fc1→coil, fc2→discrete, fc3→holding, fc4→input)
+local_offset  = 0       # ローカル device の開始アドレス
+```
+
+- `local_kind` は fc と同じ大きさ (ビット/ワード) でなければエラー。例: リモートの holding をローカルの input として公開する等の用途で指定する
+- ミラーは 1 回の poll につき 1 回の device 書き込み (= 1 つの変数変更イベント)
+- 接続・タイムアウト・例外応答・解析エラーはすべて WARN ログ 1 行で、次の tick は普通に動く。通信エラーがあってもプロセスは止まらない
+
 ## [[script]] — 周期スクリプト
 
 ```toml

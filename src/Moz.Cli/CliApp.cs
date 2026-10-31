@@ -5,6 +5,7 @@ using Moz;
 using Moz.Config;
 using Moz.Devices;
 using Moz.Logging;
+using Moz.Modbus.Client;
 using Moz.Modbus.Rtu;
 using Moz.Modbus.Tcp;
 using Moz.Scripts;
@@ -145,6 +146,20 @@ public static class CliApp
                 loggerFactory.CreateLogger($"moz.script.{s.Name}")));
         }
 
+        // client pollers (phase 6): moz as master mirrors remote slaves into local devices
+        foreach (var c in config.Client)
+        {
+            runners.Add(new ModbusClientPoller(
+                c.Name,
+                ParseRemoteAddr(c.RemoteAddr),
+                (byte)c.RemoteUnit,
+                c.IntervalMs,
+                c.TimeoutMs,
+                devices[c.Device],
+                c.Poll.Select(p => new PollEntry(p.Fc, p.RemoteOffset, p.Count, p.EffectiveLocalTable(), p.LocalOffset)).ToArray(),
+                loggerFactory.CreateLogger($"moz.client.{c.Name}")));
+        }
+
         foreach (var s in config.Server)
         {
             var device = devices[s.Device];
@@ -195,6 +210,22 @@ public static class CliApp
 
         logger.LogInformation("all runners stopped");
         return 0;
+    }
+
+    /// <summary>Resolve a validated host:port client remote into an endpoint.</summary>
+    private static IPEndPoint ParseRemoteAddr(string addr)
+    {
+        var sep = addr.LastIndexOf(':');
+        var host = addr[..sep];
+        var port = int.Parse(addr[(sep + 1)..]);
+        if (IPAddress.TryParse(host, out var ip))
+        {
+            return new IPEndPoint(ip, port);
+        }
+        // hostname: resolve once at startup (a client that must survive DNS
+        // changes would re-resolve per cycle — only add that when needed)
+        var addresses = System.Net.Dns.GetHostAddresses(host);
+        return new IPEndPoint(addresses.First(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork), port);
     }
 
     /// <summary>Open the serial port backing an RTU runner; the Core layer only ever sees the stream.</summary>

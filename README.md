@@ -50,7 +50,7 @@ moz moz.toml
 - [x] 型付き名前付き変数 (`[[variable]]`, 変更ログ)
 - [x] スクリプト (JavaScript, 64bit は BigInt で正確)
 - [x] Modbus RTU (シリアル、仮想 COM 無しのメモリ pipe テスト込み)
-- [ ] クライアント (マスタ)
+- [x] クライアント (マスタ; `[[client]]`, リモートスレーブのミラー)
 - [ ] OPC UA (in-process)
 
 ## ライセンス

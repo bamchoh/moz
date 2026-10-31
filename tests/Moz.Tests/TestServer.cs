@@ -16,11 +16,11 @@ internal sealed class TestServer(Device device, ushort port, CancellationTokenSo
     public CapturingProvider? Provider { get; } = provider;
 
     public static async Task<TestServer> Start(Device? device = null, ushort[]? unitIds = null,
-        CapturingProvider? provider = null)
+        CapturingProvider? provider = null, int? port = null)
     {
         device ??= MakeDefaultDevice();
         var server = new ModbusTcpServer(
-            "test", new IPEndPoint(IPAddress.Loopback, 0), device, unitIds,
+            "test", new IPEndPoint(IPAddress.Loopback, port ?? 0), device, unitIds,
             provider is null ? NullLogger.Instance : provider.CreateLogger("test"));
         var cts = new CancellationTokenSource();
         var run = server.RunAsync(cts.Token);

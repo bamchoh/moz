@@ -1,4 +1,4 @@
-# Modbus 実装仕様 (フェーズ 1: Modbus TCP / フェーズ 5: Modbus RTU)
+# Modbus 実装仕様 (フェーズ 1: Modbus TCP / フェーズ 5: Modbus RTU / フェーズ 6: クライアント)
 
 この文書は `Moz.Core/Modbus/` のコーデック実装の仕様であり、`tests/Moz.Tests/ModbusPduTests.cs`（PDU）と `RtuTests.cs`（RTU 層）がこの表をエンコードしている。両者を同時に更新すること。
 
@@ -90,3 +90,13 @@ warn: moz.server.sim-a[0] conn=c1 remote=127.0.0.1:53124 err=bad MBAP header (pr
 - unserved な slave address → 無応答（TCP の unit_ids と同じ規約）。設定した `unit_ids` に含まれないアドレスは答えない
 - サーバは生 `Stream` を受け取る。シリアルポートを開く（System.IO.Ports）のは CLI 側であり、コアは配管を知らない。テストはメモリ内 pipe で実施（仮想 COM 不要）
 - TCP と同一の PDU コーデック・例外コード・上限を使う。unit id は MBAP ではなく ADU から来る
+
+## Modbus TCP クライアント (マスタ) — フェーズ 6
+
+`[[client]]` の動き。v1 は FC01-04 の読み取りミラーのみ（リモートへの書き込みは後フェーズ）。
+
+- リクエスト構築: `ModbusClient.BuildReadRequest` (fc + addr2 + qty2) — MBAP ヘッダ (トランザクション id は接続内で 1 順増加) + unit id を付けて送信
+- 応答解析: `ParseWordResponse` (FC03/04) / `ParseBitResponse` (FC01/02)。**例外応答 (fc|0x80 + code) は解析せず warn ログ 1 行**、ローカルには何も書かない。応答の FC エコー・byteCount・tid 一致を検証し、不整合は接続ごと切って次 tick で張り直す
+- ミラーは 1 poll = 1 回の device Write (1 つの DeviceChange) — 変数変更ログが自然に出る
+- 通信エラーの規約はスクリプト/サーバと同じ: ログして次 tick。プロセスは止まらない
+- テスト: moz 自身の TCP サーバを相手に実通信で検証（リモート停止→復旧の再接続も含む）

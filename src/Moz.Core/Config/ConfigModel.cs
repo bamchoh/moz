@@ -15,6 +15,9 @@ public sealed class MozConfig
     [TomlPropertyName("variable")]
     public List<VariableConfig> Variable { get; set; } = [];
 
+    [TomlPropertyName("client")]
+    public List<ClientConfig> Client { get; set; } = [];
+
     [TomlPropertyName("script")]
     public List<ScriptConfig> Script { get; set; } = [];
 
@@ -148,6 +151,86 @@ public sealed class ScriptConfig
 
     [TomlExtensionData]
     public IDictionary<string, object?>? Extra { get; set; }
+}
+
+/// <summary>
+/// moz as Modbus master (phase 6): polls a remote slave on an interval and
+/// mirrors the answers into one local device (read-only mirroring; writes
+/// back to the remote come in a later phase).
+/// </summary>
+public sealed class ClientConfig
+{
+    [TomlPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    /// <summary>The local device that receives the mirrored cells.</summary>
+    [TomlPropertyName("device")]
+    public string Device { get; set; } = "";
+
+    /// <summary>host:port of the remote slave.</summary>
+    [TomlPropertyName("remote_addr")]
+    public string RemoteAddr { get; set; } = "";
+
+    /// <summary>Unit id sent to the remote. Default 1.</summary>
+    [TomlPropertyName("remote_unit")]
+    public int RemoteUnit { get; set; } = 1;
+
+    /// <summary>Poll period in milliseconds (100..3600000). Default 1000.</summary>
+    [TomlPropertyName("interval_ms")]
+    public int IntervalMs { get; set; } = 1000;
+
+    /// <summary>Per-request wait (10..600000). Default 5000.</summary>
+    [TomlPropertyName("timeout_ms")]
+    public int TimeoutMs { get; set; } = 5000;
+
+    [TomlPropertyName("poll")]
+    public List<PollConfig> Poll { get; set; } = [];
+
+    [TomlExtensionData]
+    public IDictionary<string, object?>? Extra { get; set; }
+}
+
+public sealed class PollConfig
+{
+    /// <summary>1..4 (read FCs only). Default 3 (read holding registers).</summary>
+    [TomlPropertyName("fc")]
+    public int Fc { get; set; } = 3;
+
+    /// <summary>First address on the remote slave.</summary>
+    [TomlPropertyName("remote_offset")]
+    public int RemoteOffset { get; set; }
+
+    /// <summary>Number of cells (bits or words). Default 1.</summary>
+    [TomlPropertyName("count")]
+    public int Count { get; set; } = 1;
+
+    /// <summary>Local table: coil|discrete|holding|input. Default derived from fc.</summary>
+    [TomlPropertyName("local_kind")]
+    public string? LocalKind { get; set; }
+
+    /// <summary>First address of the local table.</summary>
+    [TomlPropertyName("local_offset")]
+    public int LocalOffset { get; set; }
+
+    [TomlExtensionData]
+    public IDictionary<string, object?>? Extra { get; set; }
+
+    /// <summary>The local table derived from fc (validation ensures kind consistency).</summary>
+    public TableKind EffectiveLocalTable() => (LocalKind ?? Fc switch
+    {
+        1 => "coil",
+        2 => "discrete",
+        3 => "holding",
+        4 => "input",
+        _ => throw new FormatException($"invalid fc {Fc}"),
+    }) switch
+    {
+        "coil" => TableKind.Coil,
+        "discrete" => TableKind.DiscreteInput,
+        "holding" => TableKind.HoldingRegister,
+        "input" => TableKind.InputRegister,
+        _ => throw new FormatException($"invalid local_kind \"{LocalKind}\""),
+    };
 }
 
 public sealed class ServerConfig
