@@ -81,7 +81,7 @@ internal sealed class RawClient(TestServer server) : IDisposable
 }
 
 /// <summary>Captures log entries in memory (test subscription of the comm log).</summary>
-internal sealed class CapturingProvider : ILoggerProvider
+sealed class CapturingProvider : ILoggerProvider
 {
     public sealed record Captured(LogLevel Level, int EventId, string Message);
 

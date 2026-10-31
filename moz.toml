@@ -67,3 +67,11 @@ protocol = "modbus-tcp"
 device = "plc-a"
 bind = "127.0.0.1"
 port = 50201
+
+# OPC UA example (phase 7): publish the plc-a variables as nodes.
+# Nodes live under Objects/plc-ua (ns=urn:moz:ua:ns).
+[[server]]
+name = "ua-a"
+protocol = "opcua"
+device = "plc-a"
+endpoint = "opc.tcp://127.0.0.1:48400"

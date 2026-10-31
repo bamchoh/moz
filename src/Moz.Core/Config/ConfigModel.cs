@@ -284,6 +284,11 @@ public sealed class ServerConfig
     [TomlPropertyName("idle_gap_ms")]
     public int IdleGapMs { get; set; } = 50;
 
+    /// <summary>OPC UA endpoint URL (REQUIRED for opcua): "opc.tcp://127.0.0.1:4840".
+    /// Ignored-and-rejected on non-opcua protocols. The bind/port keys do not apply.</summary>
+    [TomlPropertyName("endpoint")]
+    public string? Endpoint { get; set; }
+
     [TomlExtensionData]
     public IDictionary<string, object?>? Extra { get; set; }
 }

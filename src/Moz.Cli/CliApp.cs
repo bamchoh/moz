@@ -6,6 +6,7 @@ using Moz.Config;
 using Moz.Devices;
 using Moz.Logging;
 using Moz.Modbus.Client;
+using Moz.OpcUa;
 using Moz.Modbus.Rtu;
 using Moz.Modbus.Tcp;
 using Moz.Scripts;
@@ -170,6 +171,14 @@ public static class CliApp
                     new IPEndPoint(IPAddress.Parse(s.Bind!), s.Port),
                     device,
                     s.UnitIds is { Count: > 0 } ? s.UnitIds.Select(u => (ushort)u).ToArray() : null,
+                    loggerFactory.CreateLogger($"moz.server.{s.Name}")),
+                "opcua" => new OpcUaServerRunner(
+                    s.Name,
+                    s.Endpoint!,
+                    device,
+                    variableTables.TryGetValue(s.Device, out var vt)
+                        ? vt
+                        : new VariableTable(device, [], loggerFactory.CreateLogger($"moz.device.{s.Device}")),
                     loggerFactory.CreateLogger($"moz.server.{s.Name}")),
                 "modbus-rtu" => new RtuServer(
                     s.Name,

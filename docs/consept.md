@@ -65,4 +65,4 @@ karakuri（先代ツール）の反省を設計指針にしています:
 4. スクリプト (Jint, `plc` API, ULINT=BigInt) ← **完了**
 5. Modbus RTU (シリアル; Stream 汎用サーバ、メモリ pipe で結合テスト) ← **完了**
 6. クライアント (マスタ; `[[client]]` ポール表、リモートをローカル device へミラー) ← **完了**
-7. OPC UA (in-process C#) ← **現在地**
+7. OPC UA (in-process C#; 変数→ノード公開、Watch→値更新) ← **完了** (サブスク通知の publish パイプライン検証と asyncua タイムスタンプ付き書込みは継続課題 — docs/spec-config.md)

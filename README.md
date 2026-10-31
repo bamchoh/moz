@@ -51,7 +51,7 @@ moz moz.toml
 - [x] スクリプト (JavaScript, 64bit は BigInt で正確)
 - [x] Modbus RTU (シリアル、仮想 COM 無しのメモリ pipe テスト込み)
 - [x] クライアント (マスタ; `[[client]]`, リモートスレーブのミラー)
-- [ ] OPC UA (in-process)
+- [x] OPC UA (in-process; 変数→ノード公開)
 
 ## ライセンス
 

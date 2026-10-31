@@ -185,3 +185,28 @@ protocol = "modbus-tcp"
 device = "plc-a"
 port = 50201
 ```
+
+## [[server]] protocol = "opcua" — OPC UA サーバ (フェーズ 7)
+
+```toml
+[[server]]
+name     = "ua-a"
+protocol = "opcua"
+device   = "plc-a"      # device の型付き変数をノード公開
+endpoint = "opc.tcp://127.0.0.1:4840"  # 必須 (opc.tcp URL、bind/port キーは不使用)
+```
+
+- ノード構成: `Objects/plc-ua/<変数名>` (ns=urn:moz:ua:ns、BrowseName=変数名)。`[[variable]]` 宣言分がすべて公開される
+- UA データ型の対応: bool→Boolean, int→Int16, uint→UInt16, dint→Int32, udint→UInt32, real→Float, lint→Int64, ulint→UInt64
+- セキュリティ: None ポリシー + 匿名のみ (karakuri 準拠)。証明書は自己署名を pki-<name> フォルダに自動作成
+- **ServerSecurityPolicy.SecurityMode は必須** (SDK 2.0 の既定値は Invalid で、未設定だと全 OPN が黙って失敗する — スパイクで確認済み)
+- 読み取りは都度 device から実施、書き込みは VariableTable の範囲チェック経由 (BadOutOfRange/BadTypeMismatch/BadNotWritable を返す)
+- device 側の変更は Watch で node.Value へ反映 → サブスクライブ中のクライアントに通知される
+- SDK は OPCFoundation.NetStandard.Opc.Ua **2.0.1** (1.5.378 は .NET 10 でトランスポートが壊れているため不可 — スパイクで確認済み)
+
+### フェーズ 7 検証状況と既知の注意点
+
+- **外部クライアント検証済み** (asyncua): browse (`Objects/plc--a/temperature` 等)、read (スクリプト周期書込み値が UA 経由でも追従)、write (`42.5` → device → Modbus マスタへも反映)。in-process SDK クライアントでも read と device 変更のノード反映を回帰テストで担保
+- **タイムスタンプ付き書き込み**: 証明済みの型のみ許可。asyncua の `write_value()` 等が送るタイムスタンプ付き書込みは SDK 2.0.1 の検証で BadOutOfRange になる (2.0.1 の StatusCodes では 0x803C0000 の名前定義が spec とずれている疑問もある)。`DataValue` のタイムスタンプ無し書き込み (Modbus 的ツールはこちらが主流) は問題なし。UAExpert 相当の実機検証で必要になったら改修
+- **クライアント通知**: SDK の MonitoredItem attach は成功 (initial value キュー込)。device 変更 → Watch → node.Value 更新と ChangeMasks は実装済みだが、publish 通知がテストでまだ確認できていない。SDK 2.0 の publish パイプライン (V2 engine) の継続検証課題
+- **匿名ユーザーの書込み拒否**: SDK 2.0 のセッション識別検証がプロセス内クライアントの書込みを拒否するケースあり (外部クライアントでは問題なし)

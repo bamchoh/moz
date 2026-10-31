@@ -90,7 +90,7 @@ public static class ConfigLoader
 
     private static readonly string[] LogLevels = ["trace", "debug", "info", "warn", "error"];
     private static readonly string[] LogFormats = ["text", "json"];
-    private static readonly string[] Protocols = ["modbus-tcp", "modbus-rtu"];
+    private static readonly string[] Protocols = ["modbus-tcp", "modbus-rtu", "opcua"];
 
     private static void Validate(MozConfig config, string path, List<ConfigError> errors)
     {
@@ -170,6 +170,31 @@ public static class ConfigLoader
             {
                 errors.Add(new ConfigError(path,
                     $"server.serial_port is only valid for serial protocols (modbus-rtu), set on \"{server.Name}\" ({server.Protocol})"));
+            }
+
+            // opcua wiring (phase 7)
+            if (server.Protocol == "opcua")
+            {
+                Require(server.Endpoint ?? "", "server.endpoint", path, errors,
+                    $"[server \"{server.Name}\"] (required for opcua)");
+                if (server.Endpoint is { } endpointValue)
+                {
+                    if (!TryParseOpcUaEndpoint(endpointValue))
+                    {
+                        errors.Add(new ConfigError(path,
+                            $"server.endpoint value \"{endpointValue}\" is invalid (opc.tcp://host:port, port 1..65535) on \"{server.Name}\""));
+                    }
+                    if (server.SerialPort is not null)
+                    {
+                        errors.Add(new ConfigError(path,
+                            $"server.serial_port is not valid on opcua server \"{server.Name}\""));
+                    }
+                }
+            }
+            else if (server.Endpoint is not null)
+            {
+                errors.Add(new ConfigError(path,
+                    $"server.endpoint is only valid for the opcua protocol, set on \"{server.Name}\" ({server.Protocol})"));
             }
             CheckRange(server.Baud, "server.baud", 110, 4_000_000, path, errors);
             CheckChoice(server.Parity, ["none", "even", "odd"], "server.parity", path, errors,
@@ -416,6 +441,17 @@ public static class ConfigLoader
     }
 
     private static bool IsBitLocalKind(string kind) => kind is "coil" or "discrete";
+
+    private static bool TryParseOpcUaEndpoint(string value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
+            uri.Scheme != "opc.tcp" ||
+            uri.Port is < 1 or > 65535)
+        {
+            return false;
+        }
+        return !string.IsNullOrWhiteSpace(uri.Host);
+    }
 
     private static bool TryParseRemoteAddr(string addr)
     {
