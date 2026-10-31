@@ -70,6 +70,18 @@ unit_ids  = [1]       # 応答する Unit ID。省略/空 = 全 Unit ID に応�
 
 unit_ids を設定した場合、リストに無い Unit ID への要求は**無応答**（マスタ側はタイムアウトする）。
 
+## [[script]] — 周期スクリプト
+
+```toml
+[[script]]
+name        = "counter"
+device      = "plc-a"   # 対象 device (必須、未宣言名はエラー)
+path        = "scripts/counter.js"  # config からの相対パス (必須)
+interval_ms = 500       # 100..3600000 (省略: 1000)
+```
+
+スクリプトの書き方 (`plc` オブジェクト、BigInt 扱い) は docs/spec-script.md が仕様。
+
 ## 範囲と検証ルール
 
 | キー | 範囲 |
@@ -77,6 +89,7 @@ unit_ids を設定した場合、リストに無い Unit ID への要求は**無
 | device 内の点数 | 1 .. 65536 |
 | server.port | 0 .. 65535 |
 | server.unit_ids[i] | 0 .. 247 |
+| script.interval_ms | 100 .. 3600000 |
 | log.level | trace/debug/info/warn/error |
 | log.format | text/json |
 | server.protocol | modbus-tcp (他はエラー) |

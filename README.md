@@ -48,7 +48,7 @@ moz moz.toml
 - [x] Modbus TCP サーバ N 台 + 通信ログ
 - [x] `moz validate` コマンド (設定検証、単一の検証経路)
 - [x] 型付き名前付き変数 (`[[variable]]`, 変更ログ)
-- [ ] スクリプト
+- [x] スクリプト (JavaScript, 64bit は BigInt で正確)
 - [ ] Modbus RTU (シリアル)
 - [ ] クライアント (マスタ)
 - [ ] OPC UA (in-process)

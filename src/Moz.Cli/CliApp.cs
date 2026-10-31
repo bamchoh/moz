@@ -6,6 +6,7 @@ using Moz.Config;
 using Moz.Devices;
 using Moz.Logging;
 using Moz.Modbus.Tcp;
+using Moz.Scripts;
 
 namespace Moz.Cli;
 
@@ -128,6 +129,21 @@ public static class CliApp
         }
 
         var runners = new List<IProtocolRunner>();
+
+        // periodic scripts (phase 4): paths resolve relative to the config file
+        var configDir = Path.GetDirectoryName(Path.GetFullPath(result.File))!;
+        foreach (var s in config.Script)
+        {
+            var device = devices[s.Device];
+            runners.Add(new ScriptRunner(
+                s.Name,
+                Path.Combine(configDir, s.Path),
+                s.IntervalMs,
+                device,
+                variableTables[s.Device],
+                loggerFactory.CreateLogger($"moz.script.{s.Name}")));
+        }
+
         foreach (var s in config.Server)
         {
             var device = devices[s.Device];

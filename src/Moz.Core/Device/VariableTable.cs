@@ -196,14 +196,15 @@ public sealed class VariableTable
         }
     }
 
-    private static readonly Type[] HostTypes = [typeof(bool), typeof(int), typeof(uint), typeof(float)];
+    private static readonly Type[] HostTypes =
+        [typeof(bool), typeof(int), typeof(uint), typeof(float), typeof(long), typeof(ulong)];
 
     private static void RequireHostType(Variable v, Type type)
     {
         if (!HostTypes.Contains(type))
         {
             throw new ArgumentException(
-                $"variable \"{v.Name}\" reads/writes one of bool|int|uint|float, got {type.Name}", type.Name);
+                $"variable \"{v.Name}\" reads/writes one of bool|int|uint|float|long|ulong, got {type.Name}", type.Name);
         }
         // int must not be used against unsigned variables, etc.
         var expected = v.Type switch
@@ -212,6 +213,8 @@ public sealed class VariableTable
             VariableType.Int or VariableType.Dint => typeof(int),
             VariableType.Uint or VariableType.Udint => typeof(uint),
             VariableType.Real => typeof(float),
+            VariableType.Lint => typeof(long),
+            VariableType.Ulint => typeof(ulong),
             _ => throw new ArgumentOutOfRangeException(nameof(v), v.Type, null),
         };
         if (type != expected)
@@ -237,6 +240,10 @@ public sealed class VariableTable
                 return ((uint)words[0] << 16) | words[1];
             case VariableType.Real:
                 return BitConverter.UInt32BitsToSingle(((uint)words[0] << 16) | words[1]);
+            case VariableType.Lint:
+                return (long)(((ulong)words[0] << 48) | ((ulong)words[1] << 32) | ((ulong)words[2] << 16) | words[3]);
+            case VariableType.Ulint:
+                return ((ulong)words[0] << 48) | ((ulong)words[1] << 32) | ((ulong)words[2] << 16) | (ulong)words[3];
             default:
                 throw new ArgumentOutOfRangeException(nameof(type), type, null);
         }
@@ -244,7 +251,7 @@ public sealed class VariableTable
 
     private static void Encode(VariableType type, object value, Span<ushort> dest)
     {
-        // unbox to the exact host type first (int/uint), then narrow
+        // unbox to the exact host type first (int/uint/long/ulong), then narrow
         uint bits = type switch
         {
             VariableType.Int => unchecked((ushort)(int)value),
@@ -252,11 +259,21 @@ public sealed class VariableTable
             VariableType.Dint => unchecked((uint)(int)value),
             VariableType.Udint => (uint)value,
             VariableType.Real => BitConverter.SingleToUInt32Bits((float)value),
+            VariableType.Lint => unchecked((uint)(long)value),           // least-significant word pair
+            VariableType.Ulint => (uint)(ulong)value,
             _ => throw new ArgumentOutOfRangeException(nameof(type), type, null),
         };
         if (type is VariableType.Int or VariableType.Uint)
         {
             dest[0] = (ushort)bits;
+        }
+        else if (type is VariableType.Lint or VariableType.Ulint)
+        {
+            ulong full = type == VariableType.Lint ? unchecked((ulong)(long)value) : (ulong)value;
+            dest[0] = (ushort)(full >> 48);
+            dest[1] = (ushort)(full >> 32);
+            dest[2] = (ushort)(full >> 16);
+            dest[3] = (ushort)full;
         }
         else
         {

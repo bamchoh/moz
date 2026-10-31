@@ -23,6 +23,12 @@ kind = "coil"
 offset = 0
 type = "bool"
 
+[[script]]
+name = "demo-counter"
+device = "plc-a"
+path = "scripts/counter.js"
+interval_ms = 500
+
 [[server]]
 name = "sim-a"
 protocol = "modbus-tcp"

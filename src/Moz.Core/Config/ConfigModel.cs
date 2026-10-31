@@ -15,6 +15,9 @@ public sealed class MozConfig
     [TomlPropertyName("variable")]
     public List<VariableConfig> Variable { get; set; } = [];
 
+    [TomlPropertyName("script")]
+    public List<ScriptConfig> Script { get; set; } = [];
+
     [TomlPropertyName("server")]
     public List<ServerConfig> Server { get; set; } = [];
 
@@ -118,8 +121,33 @@ public sealed class VariableConfig
         "dint" => VariableType.Dint,
         "udint" => VariableType.Udint,
         "real" => VariableType.Real,
+        "lint" => VariableType.Lint,
+        "ulint" => VariableType.Ulint,
         _ => throw new FormatException($"invalid type \"{Type}\""),
     };
+}
+
+/// <summary>A periodic JavaScript script (phase 4). Path is relative to the
+/// config file; existence is checked at start, not at validation time.
+/// Exactly one device is targeted (its raw memory + typed variables).</summary>
+public sealed class ScriptConfig
+{
+    [TomlPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    /// <summary>References a device name; must resolve or the config is invalid.</summary>
+    [TomlPropertyName("device")]
+    public string Device { get; set; } = "";
+
+    [TomlPropertyName("path")]
+    public string Path { get; set; } = "";
+
+    /// <summary>Period in milliseconds (100..3600000). Default 1000.</summary>
+    [TomlPropertyName("interval_ms")]
+    public int IntervalMs { get; set; } = 1000;
+
+    [TomlExtensionData]
+    public IDictionary<string, object?>? Extra { get; set; }
 }
 
 public sealed class ServerConfig

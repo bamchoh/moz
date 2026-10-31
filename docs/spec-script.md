@@ -1,0 +1,67 @@
+# スクリプト仕様 (phase 4)
+
+moz は JavaScript (Jint, 純マネージ) による周期実行スクリプトを備える。この文書が仕様である。
+
+## 設定
+
+```toml
+[[script]]
+name        = "counter"
+device      = "plc-a"     # 対象 device (必須)。raw メモリ + 変数はこの device に限定される
+path        = "scripts/counter.js"   # config ファイルからの相対パス (必須)
+interval_ms = 500         # 100..3600000。省略: 1000
+```
+
+- 起動時にファイルが読めない場合、その script runner は fatal (プロセス停止)。ファイルの中身のエラーは致命的ではない (下記)
+- スクリプトの実行順序は保証されない (server と並行)
+
+## 実行モデル
+
+- 1 script = 1 engine (Jint)。エンジンは起動時に作られ、tick ごとに同じエンジンで実行する
+- ソースは **IIFE で包まれて**実行される: tick を跨いで `const/let` は持ち越されない。持ち越したい状態は (宣言なしの)`counter = 0` のようなグローバル代入か、`plc` 経由の device 変数に置くこと
+- **スクリプトのエラーは致命的ではない**: 例外は WARN ログに1行出て、次の tick は普通に動く
+- `console.log(...)` の出力は通信・変数の両ログと同じ体裁の構造化ログ (Information, EventId 2101): `script [名前] メッセージ`
+
+## `plc` オブジェクト
+
+| メソッド | 説明 |
+|---|---|
+| `plc.readVariable(name, index)` | 変数値を取得。bool / number / **BigInt** を返す |
+| `plc.writeVariable(name, value, index)` | 変数へ書き込み。型に応じて範囲チェック・エラー |
+| `plc.getVariables()` | 変数名の一覧 (配列) |
+| `plc.readBit(area, address)` / `plc.writeBit(area, address, value)` | 1 点読み書き (area: coil) |
+| `plc.readWord(area, address)` / `plc.writeWord(area, address, value)` | 1 ワード読み書き (area: holding) |
+
+- `area` は短い名前と karakuri 由来の長い名前の両方を受け付ける: `coil`/`coils`, `discrete`/`discreteInputs`, `holding`/`holdingRegisters`, `input`/`inputRegisters`
+- discrete/input への write はエラー (読取専用領域)
+- `readVariable` の戻り値は変数型に応じて:
+  | 変数型 | JS 型 |
+  |---|---|
+  | bool | boolean |
+  | int, uint, dint, udint, real | number (double) |
+  | **lint, ulint** | **BigInt** |
+- `writeVariable` は逆方向: number を整数変数へ書くと範囲チェックして narrowing。BigInt を lint/ulint へ書く。**64 ビットの誤差は生じない**
+
+## LINT/ULINT と BigInt
+
+JS の `number` は double なので 64bit 整数を正確に表せない。このため:
+
+- `lint`/`ulint` 型の変数は `plc.readVariable` が **BigInt** を返す。通常の演算子 (`+`, `-`, `<` 等) がそのまま 64 ビット精度で動作する
+- BigInt リテラルは `n` 接尾: `0xFFFFFFFFFFFFFFFFn`
+- 注意: BigInt と number は JS の仕様上、混ぜられない (`1 + 1n` はエラー)。`Number(bigint)` で変換してから混ぜること
+
+```javascript
+// ULINT カウンタを 1 ずつ進める (64 ビット精度)
+var n = plc.readVariable('serial') + 1n;
+plc.writeVariable('serial', n);
+```
+
+## 例: scripts/counter.js
+
+```javascript
+// 500ms ごとに temperature を 0.5 度上げる (37.5 で折り返し)
+var t = plc.readVariable('temperature') + 0.5;
+if (t > 37.5) { t = 20.0; }
+plc.writeVariable('temperature', t);
+console.log('temperature =', t);
+```

@@ -13,6 +13,8 @@ public enum VariableType
     Dint,   // 2 words, signed, high word first
     Udint,  // 2 words, unsigned, high word first
     Real,   // 2 words, IEEE754 single, big-endian, high word first
+    Lint,   // 4 words, signed 64-bit, high word first (script layer exposes it as JS BigInt)
+    Ulint,  // 4 words, unsigned 64-bit, high word first
 }
 
 /// <summary>A named, typed overlay range over a device's memory.</summary>
@@ -28,6 +30,7 @@ public sealed record Variable(string Name, TableKind Table, int Offset, Variable
     {
         VariableType.Int or VariableType.Uint => 1,
         VariableType.Dint or VariableType.Udint or VariableType.Real => 2,
+        VariableType.Lint or VariableType.Ulint => 4,
         VariableType.Bool => throw new ArgumentException(
             "Bool is bit-sized; use its table kind (Coil/DiscreteInput) instead", nameof(type)),
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, null),

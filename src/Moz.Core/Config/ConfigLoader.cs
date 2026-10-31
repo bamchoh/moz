@@ -78,7 +78,7 @@ public static class ConfigLoader
     private static readonly string[] LogFormats = ["text", "json"];
     private static readonly string[] Protocols = ["modbus-tcp"];
 
-    public static void Validate(MozConfig config, string path, List<ConfigError> errors)
+    private static void Validate(MozConfig config, string path, List<ConfigError> errors)
     {
         if (config.Log is not null)
         {
@@ -101,6 +101,27 @@ public static class ConfigLoader
 
         ValidateVariables(config, path, errors);
         CheckVariableOverlaps(config, path, errors);
+
+        foreach (var script in config.Script)
+        {
+            Require(script.Name, "script.name", path, errors, "[[script]]");
+            Require(script.Device, "script.device", path, errors, $"[script \"{script.Name}\"]");
+            Require(script.Path, "script.path", path, errors, $"[script \"{script.Name}\"]");
+            CheckExtra(script.Extra, $"[script \"{script.Name}\"]", path, errors);
+            CheckRange(script.IntervalMs, "script.interval_ms", 100, 3_600_000, path, errors);
+        }
+        CheckDuplicates(config.Script.Select(s => s.Name), "script", path, errors);
+
+        // script device references resolve
+        var deviceNames = config.Device.Select(d => d.Name).ToHashSet(StringComparer.Ordinal);
+        foreach (var script in config.Script)
+        {
+            if (script.Device.Length > 0 && !deviceNames.Contains(script.Device))
+            {
+                errors.Add(new ConfigError(path,
+                    $"[script \"{script.Name}\"] references device \"{script.Device}\" which is not declared"));
+            }
+        }
 
         foreach (var server in config.Server)
         {

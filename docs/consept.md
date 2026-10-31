@@ -61,8 +61,8 @@ karakuri（先代ツール）の反省を設計指針にしています:
 
 1. Modbus TCP サーバ N 台 + 通信ログ ← **完了**
 2. 仕様の強化 (`moz validate`、MBAP ポリシーマトリクスをテストで pin) ← **完了**
-3. 型付き名前付き変数 (`[[variable]]`、bool/int/uint/dint/udint/real、変更ログ) ← **完了**
-4. スクリプト (方式はその時点で決定: ClearScript / Roslyn / NLua) ← **現在地**
-5. Modbus RTU (シリアル)
+3. 型付き名前付き変数 (`[[variable]]`、bool〜ulint、変更ログ) ← **完了**
+4. スクリプト (Jint, `plc` API, ULINT=BigInt) ← **完了**
+5. Modbus RTU (シリアル) ← **現在地**
 6. クライアント (マスタ)
 7. OPC UA (in-process C#)
