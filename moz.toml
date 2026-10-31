@@ -9,6 +9,20 @@ name = "plc-a"
 holding = 1000
 coils = 1000
 
+[[variable]]
+name = "temperature"
+device = "plc-a"
+kind = "holding"
+offset = 0
+type = "real"
+
+[[variable]]
+name = "pump"
+device = "plc-a"
+kind = "coil"
+offset = 0
+type = "bool"
+
 [[server]]
 name = "sim-a"
 protocol = "modbus-tcp"

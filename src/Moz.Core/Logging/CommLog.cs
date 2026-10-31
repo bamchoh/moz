@@ -71,24 +71,8 @@ public static class CommLog
 
     // --- state classes ------------------------------------------------------
 
-    /// <summary>
-    /// Base for log-state classes: implements the key/value list MEL expects
-    /// (so AddJsonConsole emits structured fields) while ToString() provides
-    /// the humane single line for text formatters.
-    /// </summary>
-    private abstract class StateList : IReadOnlyList<KeyValuePair<string, object?>>
-    {
-        protected abstract KeyValuePair<string, object?>[] Items { get; }
-
-        public int Count => Items.Length;
-        public KeyValuePair<string, object?> this[int index] => Items[index];
-        public IEnumerator<KeyValuePair<string, object?>> GetEnumerator() =>
-            ((IEnumerable<KeyValuePair<string, object?>>)Items).GetEnumerator();
-        IEnumerator IEnumerable.GetEnumerator() => ((IEnumerable<KeyValuePair<string, object?>>)Items).GetEnumerator();
-    }
-
     private sealed class RequestState(string conn, byte unit, byte fc, ushort addr, ushort qty, byte? exc)
-        : StateList
+        : LogState
     {
         private readonly KeyValuePair<string, object?>[] _items = exc is null
             ?
@@ -116,7 +100,7 @@ public static class CommLog
         protected override KeyValuePair<string, object?>[] Items => _items;
     }
 
-    private sealed class ConnState(string conn, string remote) : StateList
+    private sealed class ConnState(string conn, string remote) : LogState
     {
         private readonly KeyValuePair<string, object?>[] _items =
         [
@@ -128,7 +112,7 @@ public static class CommLog
         protected override KeyValuePair<string, object?>[] Items => _items;
     }
 
-    private sealed class ConnErrorState(string conn, string remote, string error) : StateList
+    private sealed class ConnErrorState(string conn, string remote, string error) : LogState
     {
         private readonly KeyValuePair<string, object?>[] _items =
         [
@@ -141,7 +125,7 @@ public static class CommLog
         protected override KeyValuePair<string, object?>[] Items => _items;
     }
 
-    private sealed class ListenFailedState(string endpoint, string error) : StateList
+    private sealed class ListenFailedState(string endpoint, string error) : LogState
     {
         private readonly KeyValuePair<string, object?>[] _items =
         [

@@ -17,6 +17,9 @@ public readonly record struct DeviceChange(TableKind Table, int Start, int Count
 /// </summary>
 public interface IDeviceAccess
 {
+    /// <summary>Device name as declared in the config (used in logs and by consumers).</summary>
+    string Name { get; }
+
     /// <summary>Number of cells (bits or words) in <paramref name="table"/>.</summary>
     int Length(TableKind table);
 

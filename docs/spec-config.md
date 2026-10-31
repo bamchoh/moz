@@ -28,6 +28,34 @@ input   = 65536       # Input Register 領域
 
 device は独立したメモリ空間。複数の server が同一 device を参照できる。
 
+## [[variable]] — 型付き名前付き変数
+
+生メモリに型と名前を与えるオーバーレイ。変更はログに `plc-a temperature=12.5` 形式で出力される。
+
+```toml
+[[variable]]
+name   = "temperature"
+device = "plc-a"     # 参照する device 名 (未宣言名はエラー)
+kind   = "holding"   # coil | discrete | holding | input
+offset = 0           # 0ベースの開始位置
+type   = "real"      # bool | int | uint | dint | udint | real
+count  = 4           # 配列要素数 (省略: 1)
+```
+
+- 型とサイズ（レジスタはビッグエンディアン）:
+  | type | サイズ | 置ける kind | 値域 |
+  |---|---|---|---|
+  | bool | 1 点 | coil, discrete | true/false |
+  | int | 1 ワード | holding, input | -32768..32767 |
+  | uint | 1 ワード | holding, input | 0..65535 |
+  | dint | 2 ワード | holding, input | 32bit 符号付き |
+  | udint | 2 ワード | holding, input | 32bit 符号なし |
+  | real | 2 ワード | holding, input | IEEE754 単精度 |
+- `count > 1` で配列。要素は offset, offset+1, ... に並ぶ
+- **重複禁止**: 同一 device 内で変数名の重複、および同一 (device, kind) の範囲重複は設定エラー。別 device なら同じ名前・同じ offset でよい
+- 変更通知は 1 回の書き込みバッチにつき 1 行。マスタが生レジスタを書いても変数として観測される
+- 構造体・STRING[n]・TIME/DATE 型は OPC UA フェーズで追加する
+
 ## [[server]] — プロトコルサーバ
 
 ```toml

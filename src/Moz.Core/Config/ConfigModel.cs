@@ -1,3 +1,4 @@
+using Moz.Devices;
 using Tomlyn.Serialization;
 
 namespace Moz.Config;
@@ -10,6 +11,9 @@ public sealed class MozConfig
 
     [TomlPropertyName("device")]
     public List<DeviceConfig> Device { get; set; } = [];
+
+    [TomlPropertyName("variable")]
+    public List<VariableConfig> Variable { get; set; } = [];
 
     [TomlPropertyName("server")]
     public List<ServerConfig> Server { get; set; } = [];
@@ -60,6 +64,62 @@ public sealed class DeviceConfig
 
     [TomlExtensionData]
     public IDictionary<string, object?>? Extra { get; set; }
+}
+
+/// <summary>
+/// A named typed overlay over one device's memory, declared at top level
+/// ([[variable]]) and referencing the device by name. Top-level because
+/// Tomlyn 2.x cannot bind nested [[device.variables]] table arrays.
+/// </summary>
+public sealed class VariableConfig
+{
+    [TomlPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    /// <summary>References a device name; must resolve or the config is invalid.</summary>
+    [TomlPropertyName("device")]
+    public string Device { get; set; } = "";
+
+    /// <summary>coil | discrete | holding | input.</summary>
+    [TomlPropertyName("kind")]
+    public string Kind { get; set; } = "";
+
+    /// <summary>0-based start index.</summary>
+    [TomlPropertyName("offset")]
+    public int Offset { get; set; }
+
+    /// <summary>bool | int | uint | dint | udint | real.</summary>
+    [TomlPropertyName("type")]
+    public string Type { get; set; } = "";
+
+    /// <summary>Number of elements (1 = scalar). Default 1.</summary>
+    [TomlPropertyName("count")]
+    public int Count { get; set; } = 1;
+
+    [TomlExtensionData]
+    public IDictionary<string, object?>? Extra { get; set; }
+
+    /// <summary>Parse after validation; throws on invalid strings (validated first).</summary>
+    public TableKind ToTableKind() => Kind switch
+    {
+        "coil" => TableKind.Coil,
+        "discrete" => TableKind.DiscreteInput,
+        "holding" => TableKind.HoldingRegister,
+        "input" => TableKind.InputRegister,
+        _ => throw new FormatException($"invalid kind \"{Kind}\""),
+    };
+
+    /// <summary>Parse after validation; throws on invalid strings (validated first).</summary>
+    public VariableType ToVariableType() => Type switch
+    {
+        "bool" => VariableType.Bool,
+        "int" => VariableType.Int,
+        "uint" => VariableType.Uint,
+        "dint" => VariableType.Dint,
+        "udint" => VariableType.Udint,
+        "real" => VariableType.Real,
+        _ => throw new FormatException($"invalid type \"{Type}\""),
+    };
 }
 
 public sealed class ServerConfig

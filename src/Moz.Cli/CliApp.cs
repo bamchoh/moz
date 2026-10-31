@@ -116,6 +116,17 @@ public static class CliApp
                 inputRegisters: d.Input);
         }
 
+        // typed variable overlays (phase 3): per-device change logging +
+        // the named access surface future scripts / GUI / OPC UA will use
+        var variableTables = new Dictionary<string, VariableTable>();
+        foreach (var d in config.Device)
+        {
+            var variables = config.Variable.Where(v => v.Device == d.Name).Select(v =>
+                new Variable(v.Name, v.ToTableKind(), v.Offset, v.ToVariableType(), v.Count));
+            variableTables[d.Name] = new VariableTable(
+                devices[d.Name], variables, loggerFactory!.CreateLogger($"moz.device.{d.Name}"));
+        }
+
         var runners = new List<IProtocolRunner>();
         foreach (var s in config.Server)
         {
