@@ -1,0 +1,25 @@
+# moz.toml — example configuration
+# Full key reference: docs/spec-config.md
+
+[log]
+level = "debug"
+
+[[device]]
+name = "plc-a"
+holding = 1000
+coils = 1000
+
+[[server]]
+name = "sim-a"
+protocol = "modbus-tcp"
+device = "plc-a"
+bind = "127.0.0.1"
+port = 50200
+unit_ids = [1]
+
+[[server]]
+name = "sim-b"
+protocol = "modbus-tcp"
+device = "plc-a"
+bind = "127.0.0.1"
+port = 50201

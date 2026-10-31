@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Moz.Cli/Moz.Cli.csproj" />
+    <Project Path="src/Moz.Core/Moz.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Moz.Tests/Moz.Tests.csproj" />
+  </Folder>
+</Solution>
