@@ -22,11 +22,11 @@ public sealed class LogConfig
 {
     /// <summary>trace|debug|info|warn|error. Default: info.</summary>
     [TomlPropertyName("level")]
-    public string? Level { get; set; }
+    public string Level { get; set; } = "info";
 
     /// <summary>text|json. Default: text.</summary>
     [TomlPropertyName("format")]
-    public string? Format { get; set; }
+    public string Format { get; set; } = "text";
 
     /// <summary>Optional JSON-lines log file. Empty/absent = console only.</summary>
     [TomlPropertyName("file")]
@@ -45,18 +45,18 @@ public sealed class DeviceConfig
     [TomlPropertyName("name")]
     public string Name { get; set; } = "";
 
-    /// <summary>Table sizes; absent keys default to 65536 (karakuri parity).</summary>
+    /// <summary>Table sizes; defaults are 65536 (karakuri parity).</summary>
     [TomlPropertyName("coils")]
-    public int? Coils { get; set; }
+    public int Coils { get; set; } = 65536;
 
     [TomlPropertyName("discrete")]
-    public int? Discrete { get; set; }
+    public int Discrete { get; set; } = 65536;
 
     [TomlPropertyName("holding")]
-    public int? Holding { get; set; }
+    public int Holding { get; set; } = 65536;
 
     [TomlPropertyName("input")]
-    public int? Input { get; set; }
+    public int Input { get; set; } = 65536;
 
     [TomlExtensionData]
     public IDictionary<string, object?>? Extra { get; set; }
@@ -75,13 +75,13 @@ public sealed class ServerConfig
     [TomlPropertyName("device")]
     public string Device { get; set; } = "";
 
-    /// <summary>Bind address. Default 127.0.0.1.</summary>
+    /// <summary>Bind address. Default 127.0.0.1 (normalized in Load).</summary>
     [TomlPropertyName("bind")]
     public string? Bind { get; set; }
 
     /// <summary>Listen port. Default 50200. 0 = ephemeral (tests/CI).</summary>
     [TomlPropertyName("port")]
-    public int? Port { get; set; }
+    public int Port { get; set; } = 50200;
 
     /// <summary>Unit ids served. Empty/absent = any unit id (karakuri parity).</summary>
     [TomlPropertyName("unit_ids")]

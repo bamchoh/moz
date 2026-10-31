@@ -34,9 +34,10 @@ device = "plc1"
 port = 50200
 ```
 
-2. 起動する
+2. 検証してから起動する
 
 ```bash
+moz validate moz.toml   # 問題があれば一覧を表示して exit 2
 moz moz.toml
 ```
 
@@ -45,7 +46,7 @@ moz moz.toml
 ## 実装状況 (フェーズ)
 
 - [x] Modbus TCP サーバ N 台 + 通信ログ
-- [ ] 仕様の強化 (`moz validate`, MBAP ポリシーマトリクス)
+- [x] `moz validate` コマンド (設定検証、単一の検証経路)
 - [ ] 型付き名前付き変数 (IEC 61131-3 サブセット)
 - [ ] スクリプト
 - [ ] Modbus RTU (シリアル)

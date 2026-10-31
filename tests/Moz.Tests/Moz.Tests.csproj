@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Moz.Core\Moz.Core.csproj" />
+    <ProjectReference Include="..\..\src\Moz.Cli\Moz.Cli.csproj" />
   </ItemGroup>
 
 </Project>

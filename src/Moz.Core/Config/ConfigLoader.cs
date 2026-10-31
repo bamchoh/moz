@@ -42,23 +42,17 @@ public static class ConfigLoader
         return new ConfigResult(path, Ok(config, errors) ? config : null, errors);
     }
 
-    /// <summary>Spec defaults applied in one place (docs/spec-config.md).</summary>
+    /// <summary>
+    /// Spec defaults applied in one place (docs/spec-config.md). The other
+    /// defaults (log level/format, table sizes, port) are model property
+    /// initializers in ConfigModel; unknown values are reported by Validate.
+    /// </summary>
     private static void FillDefaults(MozConfig config)
     {
         config.Log ??= new LogConfig();
-        config.Log.Level ??= "info";
-        config.Log.Format ??= "text";
-        foreach (var device in config.Device)
-        {
-            device.Coils ??= 65536;
-            device.Discrete ??= 65536;
-            device.Holding ??= 65536;
-            device.Input ??= 65536;
-        }
         foreach (var server in config.Server)
         {
             server.Bind = string.IsNullOrWhiteSpace(server.Bind) ? "127.0.0.1" : server.Bind;
-            server.Port ??= 50200;
         }
     }
 
@@ -156,11 +150,11 @@ public static class ConfigLoader
         }
     }
 
-    private static void CheckRange(int? value, string key, int min, int max, string path, List<ConfigError> errors)
+    private static void CheckRange(int value, string key, int min, int max, string path, List<ConfigError> errors)
     {
-        if (value is { } v && (v < min || v > max))
+        if (value < min || value > max)
         {
-            errors.Add(new ConfigError(path, $"{key} value {v} is out of range {min}..{max}"));
+            errors.Add(new ConfigError(path, $"{key} value {value} is out of range {min}..{max}"));
         }
     }
 
