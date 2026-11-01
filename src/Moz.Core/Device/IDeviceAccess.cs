@@ -11,8 +11,8 @@ public readonly record struct DeviceChange(TableKind Table, int Start, int Count
 
 /// <summary>
 /// THE seam of moz. Everything that touches simulated memory goes through
-/// this surface: the Modbus transports today; typed variables (later phase),
-/// the OPC UA server and the GUI consume it unchanged.
+/// this surface: the Modbus transports, the client mirror, typed variables
+/// (and through them scripts and the OPC UA server) and a future GUI.
 /// All buffers are caller-owned; implementations never retain them.
 /// </summary>
 public interface IDeviceAccess

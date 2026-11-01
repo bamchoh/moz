@@ -1,6 +1,6 @@
 # moz
 
-PLC の通信をシミュレートするツール。Modbus TCP サーバ（スレーブ側）を設定ファイルの通りに複数起動する CLI アプリです。
+PLC の通信をシミュレートするツール。設定ファイル 1 つから Modbus TCP/RTU サーバ（スレーブ側）・Modbus TCP クライアント（マスタ側のミラー）・OPC UA サーバ・周期 JavaScript スクリプトを同一プロセスで起動する CLI アプリです。
 
 karakuri ([bamchoh/karakuri](https://github.com/bamchoh/karakuri)) の再構築作です。設計方針と層構成は [docs/consept.md](docs/consept.md)、仕様は [docs/](docs/) を参照してください。
 
@@ -43,6 +43,8 @@ moz moz.toml
 
 3. Modbus TCP (ポート 50200, Unit ID 任意) で接続して読み書きする。Ctrl+C で終了
 
+`[[variable]]` で型付き変数を宣言し、`protocol = "opcua"` の `[[server]]` を足すと同じ変数が OPC UA ノード (`Objects/<device名>/<変数名>`) として公開される。同梱の `moz.toml` がその全部入りの例
+
 ## 実装状況 (フェーズ)
 
 - [x] Modbus TCP サーバ N 台 + 通信ログ
@@ -51,7 +53,8 @@ moz moz.toml
 - [x] スクリプト (JavaScript, 64bit は BigInt で正確)
 - [x] Modbus RTU (シリアル、仮想 COM 無しのメモリ pipe テスト込み)
 - [x] クライアント (マスタ; `[[client]]`, リモートスレーブのミラー)
-- [x] OPC UA (in-process; 変数→ノード公開)
+- [x] OPC UA (in-process; 変数→ノード公開、配列ノード、サブスクリプション通知)
+- [x] 文字列・時刻型 (`string`/`time`/`tod`/`date`/`dt`) と構造体 (`[[struct]]`、葉変数へ展開)
 
 ## ライセンス
 

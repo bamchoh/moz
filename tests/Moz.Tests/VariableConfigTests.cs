@@ -45,6 +45,9 @@ public class VariableConfigTests : IDisposable
         port = 50200
         """;
 
+    private static string AppendBlock(string block) =>
+        Base.Replace("\n[[server]]", "\n" + block + "\n\n[[server]]");
+
     private static string AppendVariable(string name, string kind, string offset, string type, string? count = null) =>
         Base.Replace("\n[[server]]",
             $"\n[[variable]]\nname = \"{name}\"\ndevice = \"plc1\"\nkind = \"{kind}\"\noffset = {offset}\ntype = \"{type}\""
@@ -81,6 +84,27 @@ public class VariableConfigTests : IDisposable
         var result = Moz.Config.ConfigLoader.Load(WriteFile("enum.toml", toml));
         Assert.False(result.Ok);
         Assert.Contains(result.Errors, e => e.Message.Contains($"variable.{key} value \"{value}\""));
+    }
+
+    [Theory]
+    [InlineData("lint", Moz.Devices.VariableType.Lint)]
+    [InlineData("ulint", Moz.Devices.VariableType.Ulint)]
+    public void LintUlint_Types_Load(string type, Moz.Devices.VariableType expected)
+    {
+        var toml = AppendVariable("big", "holding", "10", type);
+        var result = Moz.Config.ConfigLoader.Load(WriteFile($"{type}.toml", toml));
+        Assert.True(result.Ok, string.Join("\n", result.Errors));
+        Assert.Equal(expected, result.Config!.Variable[1].ToVariableType());
+    }
+
+    [Fact]
+    public void Lint_FourWords_RangeCheck()
+    {
+        // holding = 100 words; a lint at offset 97 needs 4 → over by one
+        var toml = AppendVariable("big", "holding", "97", "lint");
+        var result = Moz.Config.ConfigLoader.Load(WriteFile("lintoor.toml", toml));
+        Assert.False(result.Ok);
+        Assert.Contains(result.Errors, e => e.Message.Contains("offset 97"));
     }
 
     [Fact]
@@ -210,5 +234,95 @@ public class VariableConfigTests : IDisposable
         var result = Moz.Config.ConfigLoader.Load(WriteFile("zerocount.toml", zero));
         Assert.False(result.Ok);
         Assert.Contains(result.Errors, e => e.Message.Contains("variable.count value 0"));
+    }
+
+    // --- string / time types (phase 8) ------------------------------------------
+
+    private const string StringVar =
+        "[[variable]]\nname = \"label\"\ndevice = \"plc1\"\nkind = \"holding\"\noffset = 10\ntype = \"string\"\nlength = 5";
+
+    [Fact]
+    public void String_WithLength_Loads()
+    {
+        var result = Moz.Config.ConfigLoader.Load(WriteFile("str.toml", AppendBlock(StringVar)));
+        Assert.True(result.Ok, string.Join("\n", result.Errors));
+        Assert.Equal(5, result.Config!.Variable[1].Length);
+        Assert.Equal(Moz.Devices.VariableType.String, result.Config!.Variable[1].ToVariableType());
+    }
+
+    [Fact]
+    public void String_RequiresLength()
+    {
+        var toml = AppendVariable("label", "holding", "10", "string");
+        var result = Moz.Config.ConfigLoader.Load(WriteFile("strnolen.toml", toml));
+        Assert.False(result.Ok);
+        Assert.Contains(result.Errors, e => e.Message.Contains("variable.length is required for type \"string\""));
+    }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(251, false)]
+    [InlineData(1, true)]
+    [InlineData(250, true)]
+    public void String_Length_Range(int length, bool ok)
+    {
+        var toml = AppendBlock(StringVar.Replace("length = 5", $"length = {length}"))
+            .Replace("holding = 100", "holding = 200");
+        var result = Moz.Config.ConfigLoader.Load(WriteFile($"strlen{length}.toml", toml));
+        Assert.Equal(ok, result.Ok);
+        if (!ok)
+        {
+            Assert.Contains(result.Errors, e => e.Message.Contains($"variable.length value {length} is out of range 1..250"));
+        }
+    }
+
+    [Fact]
+    public void String_Range_UsesCeilHalfLengthWords()
+    {
+        // holding = 100 words; length 5 = 3 words; offset 98 → over by one
+        var toml = AppendBlock(StringVar.Replace("offset = 10", "offset = 98"));
+        var result = Moz.Config.ConfigLoader.Load(WriteFile("stroor.toml", toml));
+        Assert.False(result.Ok);
+        Assert.Contains(result.Errors, e => e.Message.Contains("offset 98 (+3 cells)"));
+    }
+
+    [Fact]
+    public void Length_OnNonString_Fails()
+    {
+        var toml = AppendBlock(StringVar.Replace("type = \"string\"", "type = \"int\""));
+        var result = Moz.Config.ConfigLoader.Load(WriteFile("lenint.toml", toml));
+        Assert.False(result.Ok);
+        Assert.Contains(result.Errors, e => e.Message.Contains("variable.length is only valid for type \"string\""));
+    }
+
+    [Theory]
+    [InlineData("time", Moz.Devices.VariableType.Time)]
+    [InlineData("tod", Moz.Devices.VariableType.Tod)]
+    [InlineData("date", Moz.Devices.VariableType.Date)]
+    [InlineData("dt", Moz.Devices.VariableType.Dt)]
+    public void TimeTypes_Load(string type, Moz.Devices.VariableType expected)
+    {
+        var toml = AppendVariable("t", "holding", "10", type);
+        var result = Moz.Config.ConfigLoader.Load(WriteFile($"{type}.toml", toml));
+        Assert.True(result.Ok, string.Join("\n", result.Errors));
+        Assert.Equal(expected, result.Config!.Variable[1].ToVariableType());
+    }
+
+    [Fact]
+    public void Dt_FourWords_RangeCheck()
+    {
+        var toml = AppendVariable("stamp", "holding", "97", "dt");
+        var result = Moz.Config.ConfigLoader.Load(WriteFile("dtoor.toml", toml));
+        Assert.False(result.Ok);
+        Assert.Contains(result.Errors, e => e.Message.Contains("offset 97 (+4 cells)"));
+    }
+
+    [Fact]
+    public void TimeType_OnBitTable_Fails()
+    {
+        var toml = Base.Replace("kind = \"holding\"", "kind = \"coil\"").Replace("type = \"real\"", "type = \"time\"");
+        var result = Moz.Config.ConfigLoader.Load(WriteFile("timebit.toml", toml));
+        Assert.False(result.Ok);
+        Assert.Contains(result.Errors, e => e.Message.Contains("type \"time\" requires kind holding|input"));
     }
 }

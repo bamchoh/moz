@@ -23,6 +23,7 @@ public sealed class OpcUaServerRunner : IProtocolRunner
     private readonly Device _device;
     private readonly VariableTable _variables;
     private readonly ILogger _logger;
+    private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private MozUaServer? _server;
 
     public OpcUaServerRunner(string name, string endpoint, Device device,
@@ -40,16 +41,31 @@ public sealed class OpcUaServerRunner : IProtocolRunner
     /// <summary>The ApplicationConfiguration after <see cref="RunAsync"/> started (for tests).</summary>
     public ApplicationConfiguration? Config { get; private set; }
 
+    /// <summary>
+    /// Completes once the endpoint is listening; faults if startup threw.
+    /// Tests (and a future GUI) wait on this instead of polling.
+    /// </summary>
+    public Task Ready => _ready.Task;
+
     public async Task RunAsync(CancellationToken ct)
     {
-        var telemetry = OpcUaTelemetry.Telemetry;
-        Config = BuildConfig(telemetry);
-        await Config.ValidateAsync(ApplicationType.Server, CancellationToken.None);
-        var instance = new ApplicationInstance(Config, telemetry);
-        await instance.CheckApplicationInstanceCertificatesAsync(true, 2048, CancellationToken.None);
+        try
+        {
+            var telemetry = OpcUaTelemetry.Telemetry;
+            Config = BuildConfig(telemetry);
+            await Config.ValidateAsync(ApplicationType.Server, CancellationToken.None);
+            var instance = new ApplicationInstance(Config, telemetry);
+            await instance.CheckApplicationInstanceCertificatesAsync(true, 2048, CancellationToken.None);
 
-        _server = new MozUaServer(_device, _variables);
-        await instance.StartAsync(_server, ct);
+            _server = new MozUaServer(_device, _variables);
+            await instance.StartAsync(_server, ct);
+        }
+        catch (Exception ex)
+        {
+            _ready.TrySetException(ex);
+            throw;
+        }
+        _ready.TrySetResult();
 
         _logger.LogInformation("opcua endpoint listening {Name} on {Endpoint} ({Count} nodes)",
             Name, _endpoint, _variables.Variables.Count);
@@ -149,7 +165,7 @@ public sealed class OpcUaServerRunner : IProtocolRunner
 
 /// <summary>
 /// The UA server subclass wiring moz's node manager. The variable namespace:
-/// one folder per server, nodes <c>ns=2;s=&lt;variable name&gt;</c>.
+/// one folder per device, nodes <c>ns=&lt;SDK-assigned&gt;;s=&lt;variable name&gt;</c>.
 /// </summary>
 internal sealed class MozUaServer(Device device, VariableTable variables) : StandardServer(OpcUaTelemetry.Telemetry)
 {

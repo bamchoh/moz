@@ -4,8 +4,7 @@ namespace Moz.Logging;
 
 /// <summary>
 /// Device-level observation events (not communication): typed named
-/// variables changing, and later phases' device-facing events. Same
-/// structured-state pattern as <see cref="CommLog"/>.
+/// variables changing. Same structured-state pattern as <see cref="CommLog"/>.
 /// </summary>
 public static class DeviceLog
 {

@@ -5,10 +5,11 @@ namespace Moz.Devices;
 
 /// <summary>
 /// Typed named access over one device. Values are decoded/encoded between
-/// the host types (bool, int, uint, float) and the big-endian word layout;
-/// every mutation of a variable range is logged as one line, whether it
-/// comes from us (scripts, GUI) or from a Modbus master writing raw cells.
-/// Values are the observation surface of a future GUI and the OPC UA nodes.
+/// the host types (bool, int, uint, float, long, ulong, string — see
+/// <see cref="WordCodec"/>) and the big-endian word layout; every mutation
+/// of a variable range is logged as one line,
+/// whether it comes from us (scripts, OPC UA) or from a Modbus master
+/// writing raw cells. Scripts and the OPC UA nodes consume this surface.
 /// </summary>
 public sealed class VariableTable
 {
@@ -32,6 +33,15 @@ public sealed class VariableTable
             {
                 throw new ArgumentException(
                     $"variable \"{v.Name}\": type {v.Type} requires a {(Variable.KindOf(v.Type) == VariableTypeKind.Bit ? "bit (coil/discrete)" : "word (holding/input)")} table");
+            }
+            if (v.Type == VariableType.String && (v.Length < 1 || v.Length > Variable.MaxStringLength))
+            {
+                throw new ArgumentOutOfRangeException(nameof(variables),
+                    $"variable \"{v.Name}\": string length {v.Length} is out of range 1..{Variable.MaxStringLength}");
+            }
+            if (v.Type != VariableType.String && v.Length != 0)
+            {
+                throw new ArgumentException($"variable \"{v.Name}\": length applies to string only");
             }
             if (v.Offset < 0 || v.Offset + v.Cells > device.Length(v.Table))
             {
@@ -64,8 +74,8 @@ public sealed class VariableTable
     // --- typed access -------------------------------------------------------
 
     /// <summary>
-    /// Read element <paramref name="index"/> of a variable as one of the
-    /// host types: bool, int, uint or float.
+    /// Read element <paramref name="index"/> of a variable as its host type
+    /// (bool, int, uint, float, long, ulong or string).
     /// </summary>
     public T Read<T>(string name, int index = 0)
     {
@@ -73,7 +83,7 @@ public sealed class VariableTable
         CheckIndex(v, index);
         object value = Variable.IsBit(v.Type)
             ? (object)_device.ReadBit(v.Table, v.Offset + index)
-            : Decode(v.Type, ReadWords(v, index, Variable.WordSize(v.Type)));
+            : WordCodec.Decode(v, ReadWords(v, index, v.ElementWords));
         return (T)value;
     }
 
@@ -90,10 +100,10 @@ public sealed class VariableTable
         var words = new ushort[v.Cells];
         _device.Read(v.Table, v.Offset, words);
         var result = new T[v.Count];
-        int ws = Variable.WordSize(v.Type);
+        int ws = v.ElementWords;
         for (int i = 0; i < v.Count; i++)
         {
-            result[i] = (T)Decode(v.Type, words.AsSpan(i * ws, ws));
+            result[i] = (T)WordCodec.Decode(v, words.AsSpan(i * ws, ws));
         }
         return result;
     }
@@ -108,9 +118,9 @@ public sealed class VariableTable
             _device.WriteBit(v.Table, v.Offset + index, (bool)(object)value!);
             return;
         }
-        var ws = Variable.WordSize(v.Type);
+        var ws = v.ElementWords;
         Span<ushort> words = stackalloc ushort[ws];
-        Encode(v.Type, value!, words);
+        WordCodec.Encode(v, value!, words);
         _device.Write(v.Table, v.Offset + index * ws, words);
     }
 
@@ -133,11 +143,11 @@ public sealed class VariableTable
             _device.Write(v.Table, v.Offset, bits);
             return;
         }
-        int ws = Variable.WordSize(v.Type);
+        int ws = v.ElementWords;
         var words = new ushort[v.Cells];
         for (int i = 0; i < v.Count; i++)
         {
-            Encode(v.Type, values[i]!, words.AsSpan(i * ws, ws));
+            WordCodec.Encode(v, values[i]!, words.AsSpan(i * ws, ws));
         }
         _device.Write(v.Table, v.Offset, words);
     }
@@ -168,9 +178,9 @@ public sealed class VariableTable
     {
         var words = new ushort[v.Cells];
         _device.Read(v.Table, v.Offset, words);
-        int ws = Variable.WordSize(v.Type);
+        int ws = v.ElementWords;
         return VariableText(v, Enumerable.Range(0, v.Count)
-            .Select(i => DecodeText(v.Type, words.AsSpan(i * ws, ws))));
+            .Select(i => WordCodec.Format(v, words.AsSpan(i * ws, ws))));
     }
 
     private static string VariableText(Variable v, IEnumerable<string> elements) =>
@@ -196,89 +206,12 @@ public sealed class VariableTable
         }
     }
 
-    private static readonly Type[] HostTypes =
-        [typeof(bool), typeof(int), typeof(uint), typeof(float), typeof(long), typeof(ulong)];
-
     private static void RequireHostType(Variable v, Type type)
     {
-        if (!HostTypes.Contains(type))
-        {
-            throw new ArgumentException(
-                $"variable \"{v.Name}\" reads/writes one of bool|int|uint|float|long|ulong, got {type.Name}", type.Name);
-        }
-        // int must not be used against unsigned variables, etc.
-        var expected = v.Type switch
-        {
-            VariableType.Bool => typeof(bool),
-            VariableType.Int or VariableType.Dint => typeof(int),
-            VariableType.Uint or VariableType.Udint => typeof(uint),
-            VariableType.Real => typeof(float),
-            VariableType.Lint => typeof(long),
-            VariableType.Ulint => typeof(ulong),
-            _ => throw new ArgumentOutOfRangeException(nameof(v), v.Type, null),
-        };
+        var expected = WordCodec.HostType(v.Type);
         if (type != expected)
         {
             throw new ArgumentException($"variable \"{v.Name}\" is of type {v.Type}; use {expected.Name}");
-        }
-    }
-
-    /// <summary>Decode big-endian words into the host type (boxed).</summary>
-    private static object Decode(VariableType type, ReadOnlySpan<ushort> words)
-    {
-        switch (type)
-        {
-            case VariableType.Bool:
-                throw new InvalidOperationException("bool decode not via Decode()");
-            case VariableType.Int:
-                return (int)(short)words[0];
-            case VariableType.Uint:
-                return (uint)words[0];
-            case VariableType.Dint:
-                return (int)(((uint)words[0] << 16) | words[1]);
-            case VariableType.Udint:
-                return ((uint)words[0] << 16) | words[1];
-            case VariableType.Real:
-                return BitConverter.UInt32BitsToSingle(((uint)words[0] << 16) | words[1]);
-            case VariableType.Lint:
-                return (long)(((ulong)words[0] << 48) | ((ulong)words[1] << 32) | ((ulong)words[2] << 16) | words[3]);
-            case VariableType.Ulint:
-                return ((ulong)words[0] << 48) | ((ulong)words[1] << 32) | ((ulong)words[2] << 16) | (ulong)words[3];
-            default:
-                throw new ArgumentOutOfRangeException(nameof(type), type, null);
-        }
-    }
-
-    private static void Encode(VariableType type, object value, Span<ushort> dest)
-    {
-        // unbox to the exact host type first (int/uint/long/ulong), then narrow
-        uint bits = type switch
-        {
-            VariableType.Int => unchecked((ushort)(int)value),
-            VariableType.Uint => (ushort)(uint)value,
-            VariableType.Dint => unchecked((uint)(int)value),
-            VariableType.Udint => (uint)value,
-            VariableType.Real => BitConverter.SingleToUInt32Bits((float)value),
-            VariableType.Lint => unchecked((uint)(long)value),           // least-significant word pair
-            VariableType.Ulint => (uint)(ulong)value,
-            _ => throw new ArgumentOutOfRangeException(nameof(type), type, null),
-        };
-        if (type is VariableType.Int or VariableType.Uint)
-        {
-            dest[0] = (ushort)bits;
-        }
-        else if (type is VariableType.Lint or VariableType.Ulint)
-        {
-            ulong full = type == VariableType.Lint ? unchecked((ulong)(long)value) : (ulong)value;
-            dest[0] = (ushort)(full >> 48);
-            dest[1] = (ushort)(full >> 32);
-            dest[2] = (ushort)(full >> 16);
-            dest[3] = (ushort)full;
-        }
-        else
-        {
-            dest[0] = (ushort)(bits >> 16);
-            dest[1] = (ushort)bits;
         }
     }
 
@@ -288,13 +221,4 @@ public sealed class VariableTable
         _device.Read(v.Table, v.Offset + index * count, words);
         return words;
     }
-
-    private static string DecodeText(VariableType type, ReadOnlySpan<ushort> words) =>
-        FormatValue(Decode(type, words));
-
-    private static string FormatValue(object value) => value switch
-    {
-        float f => f.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
-        _ => Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? "",
-    };
 }

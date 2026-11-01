@@ -28,7 +28,7 @@ interval_ms = 500         # 100..3600000。省略: 1000
 |---|---|
 | `plc.readVariable(name, index)` | 変数値を取得。bool / number / **BigInt** を返す |
 | `plc.writeVariable(name, value, index)` | 変数へ書き込み。型に応じて範囲チェック・エラー |
-| `plc.getVariables()` | 変数名の一覧 (配列) |
+| `plc.getVariables()` | 変数名の一覧 (配列)。構造体は葉の名前 (`motor.speed`) で並ぶ |
 | `plc.readBit(area, address)` / `plc.writeBit(area, address, value)` | 1 点読み書き (area: coil) |
 | `plc.readWord(area, address)` / `plc.writeWord(area, address, value)` | 1 ワード読み書き (area: holding) |
 
@@ -40,7 +40,10 @@ interval_ms = 500         # 100..3600000。省略: 1000
   | bool | boolean |
   | int, uint, dint, udint, real | number (double) |
   | **lint, ulint** | **BigInt** |
-- `writeVariable` は逆方向: number を整数変数へ書くと範囲チェックして narrowing。BigInt を lint/ulint へ書く。**64 ビットの誤差は生じない**
+  | string | string |
+  | time, tod | number (ミリ秒) |
+  | date, dt | Date (UTC) |
+- `writeVariable` は逆方向: number を整数変数へ書くと範囲チェックして narrowing。BigInt を lint/ulint へ書く。**64 ビットの誤差は生じない**。string は UTF-8 で length バイトを超えるとエラー
 
 ## LINT/ULINT と BigInt
 
@@ -54,6 +57,21 @@ JS の `number` は double なので 64bit 整数を正確に表せない。こ�
 // ULINT カウンタを 1 ずつ進める (64 ビット精度)
 var n = plc.readVariable('serial') + 1n;
 plc.writeVariable('serial', n);
+```
+
+## 構造体
+
+構造体変数は設定読込時に葉変数へ展開されるため、スクリプトからは葉の名前でアクセスする: `plc.readVariable('motor.speed')`、`plc.writeVariable('motors[1].on', true)`、フィールド配列は `plc.readVariable('motor.samples', 2)`。構造体をまとめて 1 つのオブジェクトとして読み書きする API はない。
+
+## 時刻型と Date
+
+- `date` / `dt` は `readVariable` が JS の `Date` (UTC) を返し、`writeVariable` は `Date` または epoch ミリ秒の number (`Date.now()` の値) を受け付ける。秒未満は切り捨て、`date` はさらに UTC 0 時へ切り捨てる。1970 年より前 (負の値) はエラー
+- `time` / `tod` は number のミリ秒。`tod` は 0..4294967295、`time` は int32 の範囲
+
+```javascript
+// 1 秒ごとに dt を現在時刻へ、time を経過ミリ秒へ更新する
+plc.writeVariable('stamp', new Date());
+plc.writeVariable('elapsed', plc.readVariable('elapsed') + 1000);
 ```
 
 ## 例: scripts/counter.js

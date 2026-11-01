@@ -93,4 +93,40 @@ public class CliTests : IDisposable
         Assert.Contains("usage:", _stdout.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("validate", _stdout.ToString(), StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task Validate_StructConfig_Exits0()
+    {
+        const string toml =
+            """
+            [[device]]
+            name = "plc1"
+            holding = 100
+
+            [[struct]]
+            name = "Motor"
+            [[struct.field]]
+            name = "speed"
+            type = "int"
+            [[struct.field]]
+            name = "on"
+            type = "bool"
+
+            [[variable]]
+            name = "motor"
+            device = "plc1"
+            kind = "holding"
+            offset = 0
+            type = "Motor"
+            count = 2
+
+            [[server]]
+            name = "sim"
+            protocol = "modbus-tcp"
+            device = "plc1"
+            port = 50200
+            """;
+        var exit = await Moz.Cli.CliApp.Run(["validate", WriteFile("struct.toml", toml)]);
+        Assert.Equal(0, exit);
+    }
 }

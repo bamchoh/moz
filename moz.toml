@@ -13,6 +13,25 @@ coils = 1000
 name = "plc-mirror"
 holding = 1000
 
+# Struct (phase 8): fields laid out sequentially; expands to the leaf
+# variables motor.speed / motor.on / motor.label (scripts, logs, OPC UA
+# all see the leaves; OPC UA shows them under a "motor" folder).
+[[struct]]
+name = "Motor"
+
+[[struct.field]]
+name = "speed"
+type = "int"
+
+[[struct.field]]
+name = "on"
+type = "bool"
+
+[[struct.field]]
+name = "label"
+type = "string"
+length = 8
+
 [[variable]]
 name = "temperature"
 device = "plc-a"
@@ -33,6 +52,20 @@ device = "plc-a"
 kind = "coil"
 offset = 0
 type = "bool"
+
+[[variable]]
+name = "motor"
+device = "plc-a"
+kind = "holding"
+offset = 100
+type = "Motor"
+
+[[variable]]
+name = "updated"
+device = "plc-a"
+kind = "holding"
+offset = 110
+type = "dt"
 
 [[script]]
 name = "demo-counter"

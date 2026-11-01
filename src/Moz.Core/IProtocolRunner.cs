@@ -2,7 +2,7 @@ namespace Moz;
 
 /// <summary>
 /// One long-running communication block declared in the config: a Modbus TCP
-/// server today; an RTU server, a master poller, or the OPC UA server later.
+/// server, the RTU server, the master poller, scripts and the OPC UA server.
 /// The CLI (or a future GUI) builds a list from config and awaits them all.
 /// Loggers are constructor arguments of implementations, not interface members.
 /// </summary>

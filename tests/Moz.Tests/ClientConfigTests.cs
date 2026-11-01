@@ -163,4 +163,18 @@ public class ClientConfigTests : IDisposable
         Assert.False(result.Ok);
         Assert.Contains(result.Errors, e => e.Message.Contains("duplicate client name"));
     }
+
+    /// <summary>Nested table arrays with 2+ elements bind (Tomlyn 2.10.1 spike for [[struct.field]]).</summary>
+    [Fact]
+    public void Client_TwoPollEntries_Bind()
+    {
+        var toml = Base + "\n[[client.poll]]\nfc = 1\nremote_offset = 5\ncount = 8\nlocal_offset = 16\n";
+        var result = Load("twopolls.toml", toml);
+        Assert.True(result.Ok, string.Join("\n", result.Errors));
+        var polls = result.Config!.Client[0].Poll;
+        Assert.Equal(2, polls.Count);
+        Assert.Equal(3, polls[0].Fc);
+        Assert.Equal(1, polls[1].Fc);
+        Assert.Equal(16, polls[1].LocalOffset);
+    }
 }

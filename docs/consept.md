@@ -1,6 +1,6 @@
 # moz — 構想と設計
 
-moz は PLC の「通信」をシミュレートするツールであり、Modbus TCP サーバ（スレーブ側）を設定ファイルから複数起動する CLI です。
+moz は PLC の「通信」をシミュレートするツールであり、Modbus TCP/RTU サーバ（スレーブ側）・Modbus クライアント（マスタ側ミラー）・OPC UA サーバ・周期スクリプトを 1 つの設定ファイルから同一プロセスで起動する CLI です。
 
 karakuri（先代ツール）の反省を設計指針にしています:
 
@@ -30,7 +30,7 @@ karakuri（先代ツール）の反省を設計指針にしています:
 
 依存は常に上から下へ。`Moz.Modbus` が参照してよいのは `Moz.Devices` と `Moz.Logging` だけで、設定や CLI を参照しない。
 
-- **Devices 層**: シミュレート装置のメモリ空間。全プロトコル・将来の OPC UA サーバ・GUI が消費する唯一の表面が `IDeviceAccess`。型付き名前付き変数はこの上のオーバーレイとして後のフェーズで追加する
+- **Devices 層**: シミュレート装置のメモリ空間。全プロトコル・OPC UA サーバ・将来の GUI が消費する唯一の表面が `IDeviceAccess`。型付き名前付き変数 (`VariableTable`) はこの上のフラットなオーバーレイ。構造体は設定読込時 (`VariableLayout`) にドット名の葉変数へ展開され、コア層は構造体を知らない
 - **コーデック層 (ModbusPdu)**: request PDU → メモリ操作 → response PDU を純関数で実装。ソケットがなくても単体テスト可能で、TCP/RTU/ASCII で共有される
 - **トランスポート層**: MBAP + TCP。RTU はこの層だけ置き換える（CRC16 + 3.5 文字アイドル + シリアル）。クライアント（マスタ）役もこの層に dial 側として追加する
 
@@ -65,4 +65,5 @@ karakuri（先代ツール）の反省を設計指針にしています:
 4. スクリプト (Jint, `plc` API, ULINT=BigInt) ← **完了**
 5. Modbus RTU (シリアル; Stream 汎用サーバ、メモリ pipe で結合テスト) ← **完了**
 6. クライアント (マスタ; `[[client]]` ポール表、リモートをローカル device へミラー) ← **完了**
-7. OPC UA (in-process C#; 変数→ノード公開、Watch→値更新) ← **完了** (サブスク通知の publish パイプライン検証と asyncua タイムスタンプ付き書込みは継続課題 — docs/spec-config.md)
+7. OPC UA (in-process C#; 変数→ノード公開、配列ノード、Watch→値更新→サブスク通知、タイムスタンプ付き書込み) ← **完了**
+8. 文字列・時刻型・構造体 (`string`/`time`/`tod`/`date`/`dt`、`[[struct]]` を設定読込時に葉変数へ展開、VariableTable はフラットのまま) ← **完了**

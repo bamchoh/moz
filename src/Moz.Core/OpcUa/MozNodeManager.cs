@@ -8,9 +8,10 @@ namespace Moz.OpcUa;
 
 /// <summary>
 /// Node manager that mirrors the device's typed variables as UA nodes:
-/// one root folder per device, one scalar node per variable
-/// (<c>ns=&lt;manager&gt;;&lt;name&gt;</c>), values live-read from the device
-/// (OnSimpleReadValue) and updated on device Watch so subscriptions fire.
+/// one root folder per device, one node per variable (scalar, or a
+/// OneDimension array for count &gt; 1; <c>ns=&lt;manager&gt;;s=&lt;name&gt;</c>).
+/// Node values are refreshed on device Watch so reads and subscriptions
+/// always see the device; writes go through <see cref="UaValueCodec"/>.
 /// The namespace URI is registered at CONSTRUCTION time — required for the
 /// request routing table to map our namespace to this manager (spike finding).
 /// </summary>
@@ -20,6 +21,11 @@ internal sealed class MozNodeManager(IServerInternal server, ApplicationConfigur
 {
     public const string NamespaceUri = "urn:moz:ua:ns";
 
+    /// <summary>Read + write of value, status and source timestamp (all fit the AccessLevel byte).</summary>
+    private const byte FullAccess = AccessLevels.CurrentReadOrWrite
+        | AccessLevels.StatusWrite
+        | AccessLevels.TimestampWrite;
+
     private readonly Device _device = device;
     private readonly VariableTable _variables = variables;
     private readonly ILogger _logger = logger;
@@ -27,15 +33,6 @@ internal sealed class MozNodeManager(IServerInternal server, ApplicationConfigur
 
     /// <summary>The namespace index this manager's nodes live under.</summary>
     public ushort NodeNamespaceIndex => (ushort)NamespaceIndex;
-
-    public override async ValueTask WriteAsync(
-        OperationContext context,
-        ArrayOf<WriteValue> nodesToWrite,
-        IList<ServiceResult> errors,
-        CancellationToken cancellationToken = default)
-    {
-        await base.WriteAsync(context, nodesToWrite, errors, cancellationToken);
-    }
 
     public override async ValueTask CreateAddressSpaceAsync(
         IDictionary<NodeId, IList<IReference>> externalReferences,
@@ -49,53 +46,84 @@ internal sealed class MozNodeManager(IServerInternal server, ApplicationConfigur
             ReferenceTypeId = new NodeId(35), // Organizes
             TypeDefinitionId = new NodeId(61), // FolderType
         };
+        // struct leaves ("motor.speed", "motors[1].on") hang under one
+        // FolderState per dotted prefix; NodeId = full leaf name, BrowseName = last segment
+        var folders = new Dictionary<string, FolderState>(StringComparer.Ordinal);
         foreach (var v in _variables.Variables)
         {
+            int dot = v.Name.LastIndexOf('.');
+            var parent = dot < 0 ? folder : FolderFor(v.Name[..dot], folder, folders);
+            var leafName = dot < 0 ? v.Name : v.Name[(dot + 1)..];
             var node = new BaseDataVariableState(null)
             {
                 NodeId = new NodeId(v.Name, (ushort)NamespaceIndex),
-                BrowseName = new QualifiedName(v.Name, NamespaceIndex),
-                DisplayName = new LocalizedText(v.Name),
+                BrowseName = new QualifiedName(leafName, NamespaceIndex),
+                DisplayName = new LocalizedText(leafName),
                 ReferenceTypeId = new NodeId(35), // Organizes
                 TypeDefinitionId = new NodeId(63), // BaseDataVariableType (i=63)
-                DataType = ToUaDataType(v.Type),
-                ValueRank = ValueRanks.Scalar,
-                // StatusWrite/TimestampWrite live in the EXTENDED bits of
-                // AccessLevelEx (the served AccessLevel byte masks them out).
-                // Many UA clients (asyncua, UAExpert) send timestamps with
-                // value writes; the simulator ignores them (karakuri parity).
-                AccessLevelEx = (uint)(AccessLevels.CurrentReadOrWrite
-                    | AccessLevels.StatusWrite
-                    | AccessLevels.TimestampWrite),
+                DataType = UaValueCodec.DataType(v.Type),
+                ValueRank = UaValueCodec.ValueRank(v),
+                ArrayDimensions = UaValueCodec.ArrayDimensions(v),
+                // Many UA clients (asyncua, UAExpert) send a status/timestamp
+                // with value writes; the simulator accepts and ignores them.
+                AccessLevel = FullAccess,
+                UserAccessLevel = FullAccess,
+                AccessLevelEx = FullAccess,
                 OnSimpleWriteValue = OnWriteVariable,
                 // grant write regardless of session user (karakuri parity)
                 OnReadUserAccessLevel = OnEffectiveUserAccessLevel,
-                Value = ToVariant(ReadTyped(v)),
+                Value = UaValueCodec.Read(_variables, v),
             };
-            folder.AddChild(node);
+            parent.AddChild(node);
             _nodes[v.Name] = node;
 
             // device change → node value → subscriptions
             _device.Watch(v.Table, v.Offset, v.Cells, _ => UpdateNode(node, v));
         }
 
-        // index the whole subtree (children were added after the folder);
-        await AddPredefinedNodeAsync(SystemContext, folder, cancellationToken);
-
-        // make the folder discoverable under Objects
+        // make the folder discoverable under Objects: Objects --Organizes--> folder
+        // (forward reference on the Objects side, inverse on ours)
+        folder.AddReference(ReferenceTypeIds.Organizes, true, ObjectIds.ObjectsFolder);
         externalReferences.TryAdd(ObjectIds.ObjectsFolder,
         [
             new ReferenceNode
             {
-                ReferenceTypeId = new NodeId(35), // Organizes
-                IsInverse = true,
+                ReferenceTypeId = ReferenceTypeIds.Organizes,
+                IsInverse = false,
                 TargetId = folder.NodeId,
             },
         ]);
 
+        // index the whole subtree (children were added after the folder)
+        await AddPredefinedNodeAsync(SystemContext, folder, cancellationToken);
+
         _logger.LogInformation(
             "opcua address space: {Count} node(s) nsIndex={Ns} for device {Device}",
             _nodes.Count, NamespaceIndex, _device.Name);
+    }
+
+    /// <summary>Folder for a dotted prefix ("motors[1]" → folder "[1]" under folder "motors"), created on demand.</summary>
+    private FolderState FolderFor(string prefix, FolderState root, Dictionary<string, FolderState> folders)
+    {
+        if (folders.TryGetValue(prefix, out var existing))
+        {
+            return existing;
+        }
+        // split point: the last '.' or, for an array element ("motors[1]"), the '['
+        int split = prefix.EndsWith(']') ? prefix.LastIndexOf('[') : prefix.LastIndexOf('.');
+        var parent = split <= 0 ? root : FolderFor(prefix[..split], root, folders);
+        var name = split <= 0 ? prefix : prefix.EndsWith(']') ? prefix[split..] : prefix[(split + 1)..];
+        var created = new FolderState(null)
+        {
+            NodeId = new NodeId(prefix, (ushort)NamespaceIndex),
+            BrowseName = new QualifiedName(name, NamespaceIndex),
+            DisplayName = new LocalizedText(name),
+            ReferenceTypeId = new NodeId(35), // Organizes
+            TypeDefinitionId = new NodeId(61), // FolderType
+        };
+        parent.AddChild(created);
+        folders[prefix] = created;
+        return created;
     }
 
     /// <summary>
@@ -106,7 +134,7 @@ internal sealed class MozNodeManager(IServerInternal server, ApplicationConfigur
     private static ServiceResult OnEffectiveUserAccessLevel(
         ISystemContext context, NodeState node, ref byte userAccessLevel)
     {
-        userAccessLevel = AccessLevels.CurrentReadOrWrite;
+        userAccessLevel = FullAccess;
         return ServiceResult.Good;
     }
 
@@ -115,7 +143,7 @@ internal sealed class MozNodeManager(IServerInternal server, ApplicationConfigur
     {
         try
         {
-            node.Value = ToVariant(ReadTyped(v));
+            node.Value = UaValueCodec.Read(_variables, v);
             node.UpdateChangeMasks(NodeStateChangeMasks.Value);
             node.ClearChangeMasks(SystemContext, false);
         }
@@ -125,31 +153,17 @@ internal sealed class MozNodeManager(IServerInternal server, ApplicationConfigur
         }
     }
 
-    /// <summary>Read the variable from the device (boxed).</summary>
-    private object ReadTyped(Variable v) => v.Type switch
-    {
-        VariableType.Bool => _variables.Read<bool>(v.Name),
-        VariableType.Int or VariableType.Dint => _variables.Read<int>(v.Name),
-        VariableType.Uint or VariableType.Udint => _variables.Read<uint>(v.Name),
-        VariableType.Real => _variables.Read<float>(v.Name),
-        VariableType.Lint => _variables.Read<long>(v.Name),
-        VariableType.Ulint => _variables.Read<ulong>(v.Name),
-        _ => throw new ArgumentOutOfRangeException(nameof(v), v.Type, null),
-    };
-
     /// <summary>
-    /// The single write hook: resolves the variable by browse name and routes
-    /// through VariableTable so moz's range/readonly rules surface as proper
-    /// OPC UA status codes.
+    /// The single write hook: resolves the variable by NodeId identifier
+    /// (= the leaf variable name) and routes through VariableTable so moz's
+    /// type/range/readonly rules surface as proper OPC UA status codes:
+    /// wrong Variant type → BadTypeMismatch, off-range → BadOutOfRange,
+    /// read-only table → BadNotWritable.
     /// </summary>
     private ServiceResult OnWriteVariable(
         ISystemContext context, NodeState node, ref Variant value)
     {
-        if (node is not BaseDataVariableState state)
-        {
-            return new ServiceResult(StatusCodes.BadNodeIdUnknown);
-        }
-        var name = state.BrowseName.Name ?? "";
+        var name = node.NodeId.TryGetValue(out string? id) ? id : "";
         Variable v;
         try
         {
@@ -162,52 +176,12 @@ internal sealed class MozNodeManager(IServerInternal server, ApplicationConfigur
 
         try
         {
-            object hostValue = v.Type switch
-            {
-                // moz Int/Uint are 16-bit on the wire but int/uint on the host
-                VariableType.Int => checked((int)AsInt16(value)),
-                VariableType.Uint => checked((int)AsUShort(value)),
-                VariableType.Bool => AsBool(value),
-                VariableType.Dint => AsInt(value),
-                VariableType.Udint => (int)AsUInt(value),
-                VariableType.Real => AsFloat(value),
-                VariableType.Lint => AsLong(value),
-                VariableType.Ulint => checked((long)AsULong(value)),
-                _ => throw new ArgumentException($"variable \"{name}\" is not writable"),
-            };
-            // VariableTable.Write<T> infers T from the value: the boxed
-            // object must be written through the typed overload
-            switch (v.Type)
-            {
-                case VariableType.Bool:
-                    _variables.Write(name, (bool)hostValue);
-                    break;
-                case VariableType.Dint:
-                    _variables.Write(name, (int)hostValue);
-                    break;
-                case VariableType.Udint:
-                    _variables.Write(name, (uint)hostValue);
-                    break;
-                case VariableType.Real:
-                    _variables.Write(name, (float)hostValue);
-                    break;
-                case VariableType.Lint:
-                    _variables.Write(name, (long)hostValue);
-                    break;
-                case VariableType.Ulint:
-                    _variables.Write(name, (ulong)hostValue);
-                    break;
-                // moz Int/Uint are 16-bit: the host stores int/uint
-                case VariableType.Int:
-                    _variables.Write(name, (int)(short)hostValue);
-                    break;
-                case VariableType.Uint:
-                    _variables.Write(name, (uint)(ushort)hostValue);
-                    break;
-                default:
-                    break;
-            }
+            UaValueCodec.Write(_variables, v, value);
             return ServiceResult.Good;
+        }
+        catch (FormatException ex)
+        {
+            return ServiceResult.Create(StatusCodes.BadTypeMismatch, ex.Message);
         }
         catch (ArgumentException ex)
         {
@@ -218,56 +192,4 @@ internal sealed class MozNodeManager(IServerInternal server, ApplicationConfigur
             return ServiceResult.Create(StatusCodes.BadNotWritable, "{0} is read-only", v.Name);
         }
     }
-
-    private static short AsInt16(Variant v) =>
-        v.TryGetValue(out short s) ? s : throw new FormatException("not int16");
-
-    private static ushort AsUShort(Variant v) =>
-        v.TryGetValue(out ushort us) ? us : throw new FormatException("not uint16");
-
-    private static bool AsBool(Variant v) =>
-        v.TryGetValue(out bool b) ? b : throw new FormatException("not bool");
-
-    private static int AsInt(Variant v) =>
-        v.TryGetValue(out int i) ? i : throw new FormatException("not int32");
-
-    private static uint AsUInt(Variant v) =>
-        v.TryGetValue(out uint u) ? u : throw new FormatException("not uint32");
-
-    private static float AsFloat(Variant v) =>
-        v.TryGetValue(out float f) ? f : throw new FormatException("not float");
-
-    private static long AsLong(Variant v) =>
-        v.TryGetValue(out long l) ? l : throw new FormatException("not int64");
-
-    private static ulong AsULong(Variant v) =>
-        v.TryGetValue(out ulong ul) ? ul : throw new FormatException("not uint64");
-
-    /// <summary> moz variable type → UA data type (Int/Uint are 16-bit on the wire).</summary>
-    private static NodeId ToUaDataType(VariableType type) => type switch
-    {
-        VariableType.Bool => DataTypeIds.Boolean,
-        VariableType.Int => DataTypeIds.Int16,
-        VariableType.Uint => DataTypeIds.UInt16,
-        VariableType.Dint => DataTypeIds.Int32,
-        VariableType.Udint => DataTypeIds.UInt32,
-        VariableType.Real => DataTypeIds.Float,
-        VariableType.Lint => DataTypeIds.Int64,
-        VariableType.Ulint => DataTypeIds.UInt64,
-        _ => DataTypeIds.BaseDataType,
-    };
-
-    /// <summary>Boxed host value → Variant without the obsolete ctor.</summary>
-    private static Variant ToVariant(object value) => value switch
-    {
-        bool b => new Variant(b),
-        short s => new Variant(s),
-        ushort us => new Variant(us),
-        int i => new Variant(i),
-        uint u => new Variant(u),
-        float f => new Variant(f),
-        long l => new Variant(l),
-        ulong ul => new Variant(ul),
-        _ => throw new ArgumentOutOfRangeException(nameof(value), value, null),
-    };
 }

@@ -121,12 +121,15 @@ public static class CliApp
         }
 
         // typed variable overlays (phase 3): per-device change logging +
-        // the named access surface future scripts / GUI / OPC UA will use
+        // the named access surface scripts and the OPC UA server use
         var variableTables = new Dictionary<string, VariableTable>();
+        var structs = ConfigLoader.ToStructDefs(config);
         foreach (var d in config.Device)
         {
-            var variables = config.Variable.Where(v => v.Device == d.Name).Select(v =>
-                new Variable(v.Name, v.ToTableKind(), v.Offset, v.ToVariableType(), v.Count));
+            // struct-typed declarations expand into dotted leaf variables here;
+            // the VariableTable (and everything above it) only sees leaves
+            var variables = config.Variable.Where(v => v.Device == d.Name).SelectMany(v =>
+                VariableLayout.Expand(v.Name, v.ToTableKind(), v.Offset, v.Type, v.Count, v.Length ?? 0, structs));
             variableTables[d.Name] = new VariableTable(
                 devices[d.Name], variables, loggerFactory!.CreateLogger($"moz.device.{d.Name}"));
         }

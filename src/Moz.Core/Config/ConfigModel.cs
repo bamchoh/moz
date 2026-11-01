@@ -12,6 +12,9 @@ public sealed class MozConfig
     [TomlPropertyName("device")]
     public List<DeviceConfig> Device { get; set; } = [];
 
+    [TomlPropertyName("struct")]
+    public List<StructConfig> Struct { get; set; } = [];
+
     [TomlPropertyName("variable")]
     public List<VariableConfig> Variable { get; set; } = [];
 
@@ -48,7 +51,7 @@ public sealed class LogConfig
 
 /// <summary>
 /// One simulated device = one independent memory space. Servers attach to a
-/// device by name (a future variable overlay attaches here as well).
+/// device by name (the [[variable]] overlay attaches by the same name).
 /// </summary>
 public sealed class DeviceConfig
 {
@@ -94,13 +97,17 @@ public sealed class VariableConfig
     [TomlPropertyName("offset")]
     public int Offset { get; set; }
 
-    /// <summary>bool | int | uint | dint | udint | real.</summary>
+    /// <summary>One of <see cref="VariableTypeNames.All"/>.</summary>
     [TomlPropertyName("type")]
     public string Type { get; set; } = "";
 
     /// <summary>Number of elements (1 = scalar). Default 1.</summary>
     [TomlPropertyName("count")]
     public int Count { get; set; } = 1;
+
+    /// <summary>String byte length (1..250). Required for type string, forbidden otherwise.</summary>
+    [TomlPropertyName("length")]
+    public int? Length { get; set; }
 
     [TomlExtensionData]
     public IDictionary<string, object?>? Extra { get; set; }
@@ -116,18 +123,48 @@ public sealed class VariableConfig
     };
 
     /// <summary>Parse after validation; throws on invalid strings (validated first).</summary>
-    public VariableType ToVariableType() => Type switch
-    {
-        "bool" => VariableType.Bool,
-        "int" => VariableType.Int,
-        "uint" => VariableType.Uint,
-        "dint" => VariableType.Dint,
-        "udint" => VariableType.Udint,
-        "real" => VariableType.Real,
-        "lint" => VariableType.Lint,
-        "ulint" => VariableType.Ulint,
-        _ => throw new FormatException($"invalid type \"{Type}\""),
-    };
+    public VariableType ToVariableType() => VariableTypeNames.TryParse(Type, out var type)
+        ? type
+        : throw new FormatException($"invalid type \"{Type}\"");
+}
+
+/// <summary>
+/// A user-defined struct type (phase 8): fields laid out sequentially on a
+/// word table in declaration order. A [[variable]] whose type names a struct
+/// expands into dotted leaf variables at load time (see VariableLayout).
+/// </summary>
+public sealed class StructConfig
+{
+    [TomlPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [TomlPropertyName("field")]
+    public List<StructFieldConfig> Field { get; set; } = [];
+
+    [TomlExtensionData]
+    public IDictionary<string, object?>? Extra { get; set; }
+}
+
+/// <summary>One struct field: a scalar type or another struct (nesting allowed, no cycles).</summary>
+public sealed class StructFieldConfig
+{
+    [TomlPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    /// <summary>A scalar type name or a declared struct name.</summary>
+    [TomlPropertyName("type")]
+    public string Type { get; set; } = "";
+
+    /// <summary>Number of elements (1 = scalar). Default 1.</summary>
+    [TomlPropertyName("count")]
+    public int Count { get; set; } = 1;
+
+    /// <summary>String byte length (1..250). Required for type string, forbidden otherwise.</summary>
+    [TomlPropertyName("length")]
+    public int? Length { get; set; }
+
+    [TomlExtensionData]
+    public IDictionary<string, object?>? Extra { get; set; }
 }
 
 /// <summary>A periodic JavaScript script (phase 4). Path is relative to the
@@ -238,7 +275,7 @@ public sealed class ServerConfig
     [TomlPropertyName("name")]
     public string Name { get; set; } = "";
 
-    /// <summary>Phase 1: only "modbus-tcp". (modbus-rtu etc. arrive in later phases.)</summary>
+    /// <summary>"modbus-tcp" | "modbus-rtu" | "opcua" (validated by ConfigLoader).</summary>
     [TomlPropertyName("protocol")]
     public string Protocol { get; set; } = "";
 

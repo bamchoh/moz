@@ -9,7 +9,8 @@ namespace Moz.Scripts;
 ///
 /// Variable access is type-aware: LINT/ULINT values surface as BigInt
 /// (System.Numerics.BigInteger is the engine-agnostic equivalent), other
-/// numerics as double, bools as boolean. Raw memory access uses the Modbus
+/// numerics as double (time/tod in milliseconds), bools as boolean, strings
+/// as string, date/dt as DateTime (UTC; JS Date). Raw memory access uses the Modbus
 /// table names; both short ("coil", "holding", ...) and long ("coils",
 /// "holdingRegisters", ...) spellings are accepted.
 /// </summary>
@@ -32,12 +33,16 @@ public sealed class PlcApi
         var v = _variables.Find(name);
         return v.Type switch
         {
-            VariableType.Bool => _variables.Read<bool>(name, index),
+            VariableType.Bool or VariableType.BoolWord => _variables.Read<bool>(name, index),
             VariableType.Int or VariableType.Dint => (double)_variables.Read<int>(name, index),
             VariableType.Uint or VariableType.Udint => (double)_variables.Read<uint>(name, index),
             VariableType.Real => _variables.Read<float>(name, index),
             VariableType.Lint => new BigInteger(_variables.Read<long>(name, index)),
             VariableType.Ulint => new BigInteger(_variables.Read<ulong>(name, index)),
+            VariableType.String => _variables.Read<string>(name, index),
+            VariableType.Time => (double)_variables.Read<int>(name, index),
+            VariableType.Tod => (double)_variables.Read<uint>(name, index),
+            VariableType.Date or VariableType.Dt => EpochSecondsToDateTime(_variables.Read<ulong>(name, index)),
             _ => throw new ArgumentOutOfRangeException(nameof(v), v.Type, null),
         };
     }
@@ -50,6 +55,7 @@ public sealed class PlcApi
         switch (v.Type)
         {
             case VariableType.Bool:
+            case VariableType.BoolWord:
                 _variables.Write(name, Require<bool>(value, v), index);
                 break;
             case VariableType.Int:
@@ -69,12 +75,27 @@ public sealed class PlcApi
             case VariableType.Ulint:
                 _variables.Write(name, (ulong)RequireBigInteger(value, v, ulong.MinValue, ulong.MaxValue), index);
                 break;
+            case VariableType.String:
+                _variables.Write(name, Require<string>(value, v), index);
+                break;
+            case VariableType.Time:
+                _variables.Write(name, (int)RequireDouble(value, v, int.MinValue, int.MaxValue), index);
+                break;
+            case VariableType.Tod:
+                _variables.Write(name, (uint)RequireDouble(value, v, uint.MinValue, uint.MaxValue), index);
+                break;
+            case VariableType.Date:
+                _variables.Write(name, RequireEpochSeconds(value, v) / 86400 * 86400, index); // UTC midnight
+                break;
+            case VariableType.Dt:
+                _variables.Write(name, RequireEpochSeconds(value, v), index);
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(v), v.Type, null);
         }
     }
 
-    /// <summary>Names of all declared variables (the future GUI/OPC UA node list).</summary>
+    /// <summary>Names of all declared variables (= the OPC UA node list).</summary>
     public string[] getVariables() => _variables.Variables.Select(v => v.Name).ToArray();
 
     // --- raw memory -----------------------------------------------------------
@@ -172,6 +193,38 @@ public sealed class PlcApi
                 $"variable \"{v.Name}\": {b} out of range ({min}..{max})");
         }
         return b;
+    }
+
+    // --- time -----------------------------------------------------------------
+
+    private static readonly DateTime MaxEpoch = DateTime.MaxValue;
+
+    /// <summary>Unix seconds → UTC DateTime (a JS Date in the script); clamps past year 9999.</summary>
+    private static DateTime EpochSecondsToDateTime(ulong seconds) =>
+        seconds > (ulong)(MaxEpoch - DateTime.UnixEpoch).TotalSeconds
+            ? MaxEpoch
+            : DateTime.UnixEpoch.AddSeconds(seconds);
+
+    /// <summary>A JS Date (DateTime) or a number of epoch milliseconds → whole Unix seconds (≥ 0).</summary>
+    private static ulong RequireEpochSeconds(object? value, Variable v)
+    {
+        double seconds = value switch
+        {
+            DateTime d => (d.ToUniversalTime() - DateTime.UnixEpoch).TotalSeconds,
+            DateTimeOffset o => (o.UtcDateTime - DateTime.UnixEpoch).TotalSeconds,
+            double ms => ms / 1000.0,
+            int ms => ms / 1000.0,
+            long ms => ms / 1000.0,
+            BigInteger ms => (double)ms / 1000.0,
+            _ => throw new ArgumentException(
+                $"variable \"{v.Name}\" expects a Date or epoch milliseconds, got {value?.GetType().Name ?? "null"}"),
+        };
+        if (double.IsNaN(seconds) || seconds < 0 || seconds > ulong.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(value),
+                $"variable \"{v.Name}\": {seconds} seconds is out of range (0..)");
+        }
+        return (ulong)Math.Floor(seconds);
     }
 
     private static double EnsureIntegral(double d, Variable v)

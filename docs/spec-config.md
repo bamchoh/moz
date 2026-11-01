@@ -38,8 +38,9 @@ name   = "temperature"
 device = "plc-a"     # 参照する device 名 (未宣言名はエラー)
 kind   = "holding"   # coil | discrete | holding | input
 offset = 0           # 0ベースの開始位置
-type   = "real"      # bool | int | uint | dint | udint | real
+type   = "real"      # bool | int | uint | dint | udint | real | lint | ulint | string | time | tod | date | dt | 宣言済みの構造体名
 count  = 4           # 配列要素数 (省略: 1)
+length = 16          # string のみ: バイト長 (1..250、必須)。他の型では指定するとエラー
 ```
 
 - 型とサイズ（レジスタはビッグエンディアン）:
@@ -51,17 +52,66 @@ count  = 4           # 配列要素数 (省略: 1)
   | dint | 2 ワード | holding, input | 32bit 符号付き |
   | udint | 2 ワード | holding, input | 32bit 符号なし |
   | real | 2 ワード | holding, input | IEEE754 単精度 |
-- `count > 1` で配列。要素は offset, offset+1, ... に並ぶ
+  | lint | 4 ワード | holding, input | 64bit 符号付き (スクリプトでは BigInt) |
+  | ulint | 4 ワード | holding, input | 64bit 符号なし (スクリプトでは BigInt) |
+  | string | ceil(length/2) ワード | holding, input | UTF-8、各ワードの上位バイトが先頭の文字、余りは NUL 詰め。読取は最初の NUL で終了、不正な UTF-8 は U+FFFD。length バイトを超える書込みはエラー |
+  | time | 2 ワード | holding, input | int32 ミリ秒 (IEC TIME) |
+  | tod | 2 ワード | holding, input | uint32 ミリ秒、0 時からの経過 (TIME_OF_DAY) |
+  | date | 4 ワード | holding, input | uint64 秒、Unix epoch からの UTC 0 時の時刻 (DATE)。書込みは UTC 0 時へ切り捨て |
+  | dt | 4 ワード | holding, input | uint64 秒、Unix epoch からの経過 (DATE_AND_TIME) |
+- 時刻型のレジスタ配置は karakuri と同じ (time=int32, tod=uint32, date/dt=uint64)。変更ログは time/tod を整数 ms、date/dt を `2026-11-01T09:30:00Z` (ISO-8601 UTC、西暦 9999 年超は整数のまま)、string を `"..."` (`"` と `\` は `\` でエスケープ) で出力する
+- `count > 1` で配列。要素は offset, offset+1, ... に並ぶ (string は要素ごとに ceil(length/2) ワード)
+- `type` に `[[struct]]` で宣言した構造体名を書くと構造体変数になる (下記)
 - **重複禁止**: 同一 device 内で変数名の重複、および同一 (device, kind) の範囲重複は設定エラー。別 device なら同じ名前・同じ offset でよい
 - 変更通知は 1 回の書き込みバッチにつき 1 行。マスタが生レジスタを書いても変数として観測される
-- 構造体・STRING[n]・TIME/DATE 型は OPC UA フェーズで追加する
+
+## [[struct]] — 構造体
+
+ユーザー定義の構造体型。フィールドは宣言順に語テーブル上へ連続配置される。
+
+```toml
+[[struct]]
+name = "Motor"          # 必須、一意。組み込み型名 (int 等) は不可
+
+[[struct.field]]
+name = "speed"          # 必須、構造体内で一意
+type = "int"            # スカラ型名または他の構造体名 (ネスト可、循環は不可)
+
+[[struct.field]]
+name = "on"
+type = "bool"           # 構造体内の bool は 1 ワード (0 = false、0 以外 = true)
+
+[[struct.field]]
+name = "label"
+type = "string"
+length = 6              # string フィールドは length 必須 (1..250)、他の型では不可
+
+[[struct.field]]
+name = "samples"
+type = "real"
+count = 4               # フィールド配列 (省略: 1)
+
+[[variable]]
+name   = "motor"
+device = "plc-a"
+kind   = "holding"      # 構造体は holding | input のみ (coil/discrete はエラー)
+offset = 100
+type   = "Motor"        # 語数 = 1 + 1 + 3 + 8 = 13
+count  = 2              # 構造体配列: 要素ごとに 13 ワードずつ並ぶ
+```
+
+- **展開**: 設定読込時に構造体変数は「葉変数」へ展開され、以降の層 (変数テーブル、スクリプト、変更ログ、OPC UA) は葉だけを見る。葉の名前は `motor.speed`、ネストは `drive.motor.rpm`、構造体配列は `motors[0].on` (0 始まり)。フィールド配列は 1 つの葉に `count` を持つ (`motor.samples`、`readVariable('motor.samples', 2)` で要素アクセス)
+- 変更ログは葉ごとに 1 行 (`plc-a motor.speed=7`)。マスタが FC16 で構造体全体を書くと葉の数だけ行が出る
+- **検証**: 未知の型、構造体の循環 (`struct cycle through "A"`)、struct 名/field 名の重複、組み込み型名との衝突、フィールド 0 個、string フィールドの length 欠落/範囲外、`count < 1`、ビットテーブル上の構造体変数、構造体変数への `length` 指定、展開後の葉名と他の変数名の衝突 (`duplicate variable name "motor.speed"`)、device 長超過と重複 (展開後の総語数で判定) はすべて設定エラー
+- `[[struct.field]]` は `[[struct]]` 直下の入れ子テーブル配列として書く (Tomlyn 2.10.1 で 2 要素以上のバインドを確認済み)
+- **並び順の注意**: Tomlyn は同名のテーブル配列を別のテーブルを挟んで再開できない (`[[variable]]` → `[[struct]]` → `[[variable]]` は "Duplicate key" のパースエラー)。`[[struct]]` 群は `[[variable]]` 群の前にまとめて書くこと
 
 ## [[server]] — プロトコルサーバ
 
 ```toml
 [[server]]
 name      = "sim-a"   # 必須、一意
-protocol  = "modbus-tcp"  # 現行: "modbus-tcp" または "modbus-rtu"
+protocol  = "modbus-tcp"  # "modbus-tcp" | "modbus-rtu" | "opcua" (opcua は後節)
 device    = "plc-a"   # 参照する device 名 (未宣言名はエラー)
 bind      = "127.0.0.1"  # TCP。省略: 127.0.0.1
 port      = 50200     # TCP。省略: 50200。0 は ephemeral (テスト/CI 用)
@@ -137,13 +187,23 @@ interval_ms = 500       # 100..3600000 (省略: 1000)
 | server.stop_bits | 1 .. 2 |
 | server.idle_gap_ms | 1 .. 1000 |
 | server.unit_ids[i] | 0 .. 247 |
+| server.endpoint | opcua のみ必須。`opc.tcp://host:port` (port 1..65535) |
+| variable.count | 1 .. |
+| variable.length | 1 .. 250 (string のみ、必須) |
+| struct.field.count | 1 .. |
+| struct.field.length | 1 .. 250 (string のみ、必須) |
+| client.remote_unit | 0 .. 247 |
+| client.interval_ms | 100 .. 3600000 |
+| client.timeout_ms | 10 .. 600000 |
+| client.poll[].fc | 1 .. 4 |
+| client.poll[].count | ワード FC: 1 .. 125、ビット FC: 1 .. 2000 |
 | script.interval_ms | 100 .. 3600000 |
 | log.level | trace/debug/info/warn/error |
 | log.format | text/json |
 | server.parity | none/even/odd |
-| server.protocol | modbus-tcp / modbus-rtu (他はエラー) |
+| server.protocol | modbus-tcp / modbus-rtu / opcua (他はエラー) |
 
-- device 名・server 名は互いに重複禁止（種類が違えば可）
+- device 名・server 名・struct 名はそれぞれ重複禁止（種類が違えば可）
 - `[[device]]` が 0 件でも `[[server]]` が 0 件でも起動する（何も動かないだけでエラーではない）
 
 ## 例
@@ -196,17 +256,19 @@ device   = "plc-a"      # device の型付き変数をノード公開
 endpoint = "opc.tcp://127.0.0.1:4840"  # 必須 (opc.tcp URL、bind/port キーは不使用)
 ```
 
-- ノード構成: `Objects/plc-ua/<変数名>` (ns=urn:moz:ua:ns、BrowseName=変数名)。`[[variable]]` 宣言分がすべて公開される
-- UA データ型の対応: bool→Boolean, int→Int16, uint→UInt16, dint→Int32, udint→UInt32, real→Float, lint→Int64, ulint→UInt64
+- ノード構成: `Objects/<device名>/<変数名>` (ns=urn:moz:ua:ns、フォルダの BrowseName=device 名、変数ノードは `s=<変数名>`)。`[[variable]]` 宣言分がすべて公開される
+- 構造体変数はフォルダ (FolderType) になり、葉がその配下に並ぶ: `Objects/<device名>/motor/speed` (NodeId は葉の完全名 `s=motor.speed`、BrowseName は末尾の `speed`)。ネストは入れ子のフォルダ、構造体配列は要素ごとのフォルダ `motors/[0]/on` (NodeId `s=motors[0].on`)
+- UA データ型の対応: bool→Boolean, int→Int16, uint→UInt16, dint→Int32, udint→UInt32, real→Float, lint→Int64, ulint→UInt64, string→String, time→Int32 (ms), tod→UInt32 (ms), date/dt→DateTime (1970 年より前の書込みは BadOutOfRange、date は UTC 0 時へ切り捨て)
 - セキュリティ: None ポリシー + 匿名のみ (karakuri 準拠)。証明書は自己署名を pki-<name> フォルダに自動作成
 - **ServerSecurityPolicy.SecurityMode は必須** (SDK 2.0 の既定値は Invalid で、未設定だと全 OPN が黙って失敗する — スパイクで確認済み)
-- 読み取りは都度 device から実施、書き込みは VariableTable の範囲チェック経由 (BadOutOfRange/BadTypeMismatch/BadNotWritable を返す)
+- 読み取りはノード値 (device の Watch で常に最新)、書き込みは VariableTable 経由。ステータス: Variant の型が DataType と違う → BadTypeMismatch、値域外 → BadOutOfRange、input/discrete 上の変数 → BadNotWritable。int/uint ノードの Variant は Int16/UInt16 (DataType と一致)
 - device 側の変更は Watch で node.Value へ反映 → サブスクライブ中のクライアントに通知される
+- `count > 1` の変数は ValueRank=OneDimension (ArrayDimensions=[count]) の配列ノード。読み書きは配列全体 (要素数が違う書込みは BadOutOfRange、スカラを書くと BadTypeMismatch)。IndexRange による部分書込みは未対応
 - SDK は OPCFoundation.NetStandard.Opc.Ua **2.0.1** (1.5.378 は .NET 10 でトランスポートが壊れているため不可 — スパイクで確認済み)
 
 ### フェーズ 7 検証状況と既知の注意点
 
-- **外部クライアント検証済み** (asyncua): browse (`Objects/plc--a/temperature` 等)、read (スクリプト周期書込み値が UA 経由でも追従)、write (`42.5` → device → Modbus マスタへも反映)。in-process SDK クライアントでも read と device 変更のノード反映を回帰テストで担保
-- **タイムスタンプ付き書き込み**: 証明済みの型のみ許可。asyncua の `write_value()` 等が送るタイムスタンプ付き書込みは SDK 2.0.1 の検証で BadOutOfRange になる (2.0.1 の StatusCodes では 0x803C0000 の名前定義が spec とずれている疑問もある)。`DataValue` のタイムスタンプ無し書き込み (Modbus 的ツールはこちらが主流) は問題なし。UAExpert 相当の実機検証で必要になったら改修
-- **クライアント通知**: SDK の MonitoredItem attach は成功 (initial value キュー込)。device 変更 → Watch → node.Value 更新と ChangeMasks は実装済みだが、publish 通知がテストでまだ確認できていない。SDK 2.0 の publish パイプライン (V2 engine) の継続検証課題
-- **匿名ユーザーの書込み拒否**: SDK 2.0 のセッション識別検証がプロセス内クライアントの書込みを拒否するケースあり (外部クライアントでは問題なし)
+- **外部クライアント検証済み** (asyncua): browse (asyncua のパス表記では `Objects/plc--a/temperature`; `-` がエスケープされる)、read (スクリプト周期書込み値が UA 経由でも追従)、write (`42.5` → device → Modbus マスタへも反映)。in-process SDK クライアントでも read / 全スカラ型の write / device 変更のノード反映を回帰テストで担保
+- **タイムスタンプ/ステータス付き書き込み**: asyncua の `write_value()` や UAExpert が送る SourceTimestamp 付き書込みも受理する (値だけ採用、タイムスタンプとステータスは無視)。ノードの AccessLevel/UserAccessLevel に StatusWrite|TimestampWrite を立てていないと SDK が BadUserAccessDenied を返す — 回帰テストで pin
+- **クライアント通知**: device 変更 → Watch → node.Value 更新 → publish → in-process クライアントの MonitoredItem に新値が届くまでを回帰テスト済み
+- **匿名ユーザーの書込み**: 全ノードが全ユーザーに読み書きを許可する (moz はアクセス制御を持たない)。in-process SDK クライアントの書込みも回帰テスト済み
