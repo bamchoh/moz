@@ -9,12 +9,23 @@ namespace Moz.Modbus.Client;
 /// <summary>One poll line: read [remote_offset, +count) with fc, write into local table at local_offset.</summary>
 public readonly record struct PollEntry(int Fc, int RemoteOffset, int Count, TableKind LocalTable, int LocalOffset);
 
+/// <summary>One push line: write local [local_offset, +count) to the remote at remote_offset with fc (5/6/15/16).</summary>
+public readonly record struct PushEntry(int Fc, TableKind LocalTable, int LocalOffset, int Count, int RemoteOffset);
+
 /// <summary>
-/// moz as Modbus TCP master: connects to a remote slave and mirrors reads
-/// into a local device on a fixed interval. One persistent connection; every
-/// error (connect, timeout, exception response) is logged and the loop
-/// retries next tick — never fatal. v1 mirrors read-only (writing back to
-/// the remote arrives in a later phase).
+/// moz as Modbus TCP master: connects to a remote slave, mirrors reads into a
+/// local device on a fixed interval (polls) and writes local changes back to
+/// the remote (pushes). One persistent connection; every error (connect,
+/// timeout, exception response) is logged and the loop retries next tick —
+/// never fatal.
+///
+/// Push policy: every push entry is sent once at startup (initial sync), then
+/// again whenever its local range changes (<see cref="IDeviceAccess.Watch"/>
+/// marks it dirty and wakes the loop). Changes the poller itself makes while
+/// applying a poll never trigger a push, so the same cells may be polled and
+/// pushed (bidirectional mirror) without an echo loop. A communication error
+/// keeps the entry dirty (retried next tick); an exception response from the
+/// remote is logged and the entry is considered delivered.
 /// </summary>
 public sealed class ModbusClientPoller : IProtocolRunner
 {
@@ -24,13 +35,17 @@ public sealed class ModbusClientPoller : IProtocolRunner
     private readonly int _timeoutMs;
     private readonly Device _local;
     private readonly PollEntry[] _polls;
+    private readonly PushEntry[] _pushes;
+    private readonly int[] _dirty;                        // per push entry: 1 = local changed since last delivery
+    private readonly SemaphoreSlim _wake = new(0, 1);     // released by a local change to cut the interval wait short
     private readonly ILogger _logger;
 
     private TcpClient? _client;
     private ushort _transactionId;
+    private int _selfWriteThread = -1;                    // thread applying a poll to the local device (its Watch callbacks are ours)
 
     public ModbusClientPoller(string name, IPEndPoint remote, byte remoteUnit,
-        int intervalMs, int timeoutMs, Device local, PollEntry[] polls, ILogger logger)
+        int intervalMs, int timeoutMs, Device local, PollEntry[] polls, ILogger logger, PushEntry[]? pushes = null)
     {
         Name = name;
         _remote = remote;
@@ -39,6 +54,8 @@ public sealed class ModbusClientPoller : IProtocolRunner
         _timeoutMs = timeoutMs;
         _local = local;
         _polls = polls;
+        _pushes = pushes ?? [];
+        _dirty = new int[_pushes.Length];
         _logger = logger;
     }
 
@@ -47,29 +64,117 @@ public sealed class ModbusClientPoller : IProtocolRunner
     /// <summary>True while connected (observability for tests/future GUI).</summary>
     public bool IsConnected => _client is { Connected: true };
 
+    /// <summary>True while at least one push entry has an undelivered local change.</summary>
+    public bool HasPendingPush
+    {
+        get
+        {
+            for (int i = 0; i < _dirty.Length; i++)
+            {
+                if (Volatile.Read(ref _dirty[i]) != 0)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
     public async Task RunAsync(CancellationToken ct)
     {
+        var watches = new List<IDisposable>(_pushes.Length);
         try
         {
+            for (int i = 0; i < _pushes.Length; i++)
+            {
+                int index = i;
+                var push = _pushes[i];
+                _dirty[i] = 1; // initial sync
+                watches.Add(_local.Watch(push.LocalTable, push.LocalOffset, push.Count, _ => OnLocalChange(index)));
+            }
+
+            long nextPoll = Environment.TickCount64;
             while (!ct.IsCancellationRequested)
             {
-                await RunCycleAsync(ct);
-                await Task.Delay(_intervalMs, ct);
+                bool pollDue = Environment.TickCount64 >= nextPoll;
+                if (pollDue)
+                {
+                    nextPoll = Environment.TickCount64 + _intervalMs;
+                }
+                await RunCycleAsync(pollDue, ct);
+                int wait = (int)Math.Clamp(nextPoll - Environment.TickCount64, 1, _intervalMs);
+                await _wake.WaitAsync(wait, ct);
             }
         }
         catch (OperationCanceledException)
         {
             // shutdown
         }
+        finally
+        {
+            foreach (var w in watches)
+            {
+                w.Dispose();
+            }
+            Close();
+        }
     }
 
-    /// <summary>One interval's worth of work: (re)connect lazily, run all polls.</summary>
-    private async Task RunCycleAsync(CancellationToken ct)
+    /// <summary>Watch callback: ignore our own poll writes, otherwise mark dirty and wake the loop.</summary>
+    private void OnLocalChange(int index)
+    {
+        if (Environment.CurrentManagedThreadId == Volatile.Read(ref _selfWriteThread))
+        {
+            return;
+        }
+        Volatile.Write(ref _dirty[index], 1);
+        if (_wake.CurrentCount == 0)
+        {
+            try
+            {
+                _wake.Release();
+            }
+            catch (SemaphoreFullException)
+            {
+                // another change already woke the loop
+            }
+        }
+    }
+
+    /// <summary>One cycle: (re)connect lazily, deliver dirty pushes, then (when due) run all polls.</summary>
+    private async Task RunCycleAsync(bool pollDue, CancellationToken ct)
     {
         var stream = await ConnectAsync(ct);
         if (stream is null)
         {
             return; // connect failure already logged
+        }
+        for (int i = 0; i < _pushes.Length; i++)
+        {
+            if (Volatile.Read(ref _dirty[i]) == 0)
+            {
+                continue;
+            }
+            Volatile.Write(ref _dirty[i], 0); // cleared before reading the local values: a later change re-dirties
+            try
+            {
+                await PushAsync(stream, _pushes[i], ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Volatile.Write(ref _dirty[i], 1); // undelivered: retry next tick
+                _logger.ConnError(Name, _remote.ToString(), ex.Message);
+                Close();
+                return;
+            }
+        }
+        if (!pollDue)
+        {
+            return;
         }
         foreach (var poll in _polls)
         {
@@ -95,7 +200,55 @@ public sealed class ModbusClientPoller : IProtocolRunner
     internal async Task MirrorPollAsync(NetworkStream stream, PollEntry poll, CancellationToken ct)
     {
         var req = ModbusClient.BuildReadRequest(poll.Fc, poll.RemoteOffset, poll.Count);
+        var pdu = await ExchangeAsync(stream, req, ct);
+        if (pdu is null)
+        {
+            return;
+        }
+        CopyToLocal(poll, pdu);
+        _logger.Request(Name, _remoteUnit, (byte)poll.Fc,
+            RequestInfo.AddressOf(req), RequestInfo.QuantityOf(req),
+            IsException(pdu) ? ExceptionCodeOf(pdu) : null);
+    }
 
+    /// <summary>Write one push entry's current local cells to the remote.</summary>
+    internal async Task PushAsync(NetworkStream stream, PushEntry push, CancellationToken ct)
+    {
+        byte[] req;
+        if (push.Fc is 5 or 15)
+        {
+            var bits = new bool[push.Count];
+            _local.Read(push.LocalTable, push.LocalOffset, bits);
+            req = ModbusClient.BuildWriteRequest(push.Fc, push.RemoteOffset, bits);
+        }
+        else
+        {
+            var words = new ushort[push.Count];
+            _local.Read(push.LocalTable, push.LocalOffset, words);
+            req = ModbusClient.BuildWriteRequest(push.Fc, push.RemoteOffset, words);
+        }
+        var pdu = await ExchangeAsync(stream, req, ct);
+        if (pdu is null)
+        {
+            return;
+        }
+        if (!IsException(pdu))
+        {
+            ModbusClient.CheckWriteResponse(push.Fc, push.RemoteOffset, push.Count, pdu);
+        }
+        _logger.Request(Name, _remoteUnit, (byte)push.Fc,
+            RequestInfo.AddressOf(req), RequestInfo.QuantityOf(req),
+            IsException(pdu) ? ExceptionCodeOf(pdu) : null);
+    }
+
+    /// <summary>
+    /// One MBAP request/response on the persistent connection. Returns the
+    /// response PDU, or null when the unit id does not match (logged, nothing
+    /// to apply). Throws IOException on timeout, malformed header or a
+    /// transaction id mismatch.
+    /// </summary>
+    private async Task<byte[]?> ExchangeAsync(NetworkStream stream, byte[] req, CancellationToken ct)
+    {
         var tid = ++_transactionId;
         var frame = new byte[Mbap.HeaderSize + req.Length];
         Mbap.WriteHeader(frame, tid, _remoteUnit, req.Length);
@@ -110,7 +263,6 @@ public sealed class ModbusClientPoller : IProtocolRunner
             await stream.WriteAsync(frame, token);
 
             var header = new byte[Mbap.HeaderSize];
-            var resp = new byte[ModbusLimits.PduMaxLength + 2];
             await stream.ReadExactlyAsync(header, token);
             if (!Mbap.TryParseHeader(header, out var mbap))
             {
@@ -120,23 +272,18 @@ public sealed class ModbusClientPoller : IProtocolRunner
             {
                 throw new IOException($"response transaction id {mbap.TransactionId} ≠ request {tid}");
             }
-            await stream.ReadExactlyAsync(resp.AsMemory(0, mbap.Length - 1), token);
-
-            var pdu = resp.AsSpan(0, mbap.Length - 1);
+            var pdu = new byte[mbap.Length - 1]; // TryParseHeader bounds the length
+            await stream.ReadExactlyAsync(pdu, token);
             if (mbap.UnitId != _remoteUnit)
             {
                 _logger.MalformedFrame(Name, _remote.ToString(), $"response unit id {mbap.UnitId} ≠ {_remoteUnit}");
-                return; // no answer to mirror, stay on the connection
+                return null; // no answer to apply, stay on the connection
             }
-            CopyToLocal(poll, pdu);
-
-            _logger.Request(Name, _remoteUnit, (byte)poll.Fc,
-                RequestInfo.AddressOf(req), RequestInfo.QuantityOf(req),
-                IsException(pdu) ? ExceptionCodeOf(pdu) : null);
+            return pdu;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new IOException($"poll timed out after {_timeoutMs}ms");
+            throw new IOException($"request timed out after {_timeoutMs}ms");
         }
     }
 
@@ -147,14 +294,24 @@ public sealed class ModbusClientPoller : IProtocolRunner
         {
             return; // logged as exc=… by the Request line; the local device stays untouched
         }
-        if (poll.Fc is 3 or 4)
+        // Watch callbacks run synchronously on this thread: mark it so our push
+        // watchers can tell this write from a script/server write
+        Volatile.Write(ref _selfWriteThread, Environment.CurrentManagedThreadId);
+        try
         {
-            var words = ModbusClient.ParseWordResponse(poll.Fc, poll.Count, pdu);
-            _local.Write(poll.LocalTable, poll.LocalOffset, words);
-            return;
+            if (poll.Fc is 3 or 4)
+            {
+                var words = ModbusClient.ParseWordResponse(poll.Fc, poll.Count, pdu);
+                _local.Write(poll.LocalTable, poll.LocalOffset, words);
+                return;
+            }
+            var bits = ModbusClient.ParseBitResponse(poll.Fc, poll.Count, pdu);
+            _local.Write(poll.LocalTable, poll.LocalOffset, bits);
         }
-        var bits = ModbusClient.ParseBitResponse(poll.Fc, poll.Count, pdu);
-        _local.Write(poll.LocalTable, poll.LocalOffset, bits);
+        finally
+        {
+            Volatile.Write(ref _selfWriteThread, -1);
+        }
     }
 
     private static bool IsException(ReadOnlySpan<byte> pdu) =>

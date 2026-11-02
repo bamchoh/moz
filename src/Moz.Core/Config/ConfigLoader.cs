@@ -68,14 +68,11 @@ public static partial class ConfigLoader
         {
             foreach (var poll in client.Poll)
             {
-                poll.LocalKind ??= poll.Fc switch
-                {
-                    1 => "coil",
-                    2 => "discrete",
-                    3 => "holding",
-                    4 => "input",
-                    _ => null,
-                };
+                poll.LocalKind ??= PollConfig.DefaultLocalKind(poll.Fc);
+            }
+            foreach (var push in client.Push)
+            {
+                push.LocalKind ??= PushConfig.DefaultLocalKind(push.Fc);
             }
         }
     }
@@ -223,21 +220,10 @@ public static partial class ConfigLoader
 
     // --- client (master) validation -----------------------------------------
 
-    private static bool TryLocalKind(string kind, out TableKind parsed)
-    {
-        switch (kind)
-        {
-            case "coil": parsed = TableKind.Coil; return true;
-            case "discrete": parsed = TableKind.DiscreteInput; return true;
-            case "holding": parsed = TableKind.HoldingRegister; return true;
-            case "input": parsed = TableKind.InputRegister; return true;
-            default: parsed = default; return false;
-        }
-    }
-
-    /// <summary>Per-client: name/device/remote_addr required, ranges, poll entries.</summary>
+    /// <summary>Per-client: name/device/remote_addr required, ranges, poll and push entries.</summary>
     private static void ValidateClients(MozConfig config, string path, List<ConfigError> errors)
     {
+        var devices = config.Device.ToDictionary(d => d.Name, StringComparer.Ordinal);
         foreach (var client in config.Client)
         {
             var ctx = $"[[client]] \"{client.Name}\"";
@@ -284,25 +270,69 @@ public static partial class ConfigLoader
                     errors.Add(new ConfigError(path,
                         $"poll.local_offset value {poll.LocalOffset} is out of range 0..65535 in {pctx}"));
                 }
-                if (poll.LocalKind is { } kind && !TryLocalKind(kind, out var table))
+                CheckLocalKind(poll.LocalKind, poll.Fc, isBit, "poll", pctx, path, errors);
+            }
+
+            devices.TryGetValue(client.Device, out var device);
+            foreach (var push in client.Push)
+            {
+                var pctx = $"[[client.push]] on \"{client.Name}\"";
+                CheckExtra(push.Extra, pctx, path, errors);
+                bool isBit = push.Fc is 5 or 15;
+                if (push.Fc is not (5 or 6 or 15 or 16))
                 {
                     errors.Add(new ConfigError(path,
-                        $"poll.local_kind value \"{kind}\" is invalid (coil|discrete|holding|input) in {pctx}"));
+                        $"push.fc value {push.Fc} is invalid (5|6|15|16, writes only) in {pctx}"));
                 }
-                else if (poll.LocalKind is { } kind2 && IsBitLocalKind(kind2) != isBit)
+                else
                 {
-                    errors.Add(new ConfigError(path, isBit
-                        ? $"bit fc {poll.Fc} requires a bit local kind (coil|discrete) in {pctx}"
-                        : $"word fc {poll.Fc} requires a word local kind (holding|input) in {pctx}"));
+                    int max = push.Fc switch
+                    {
+                        5 or 6 => 1,
+                        15 => Modbus.ModbusLimits.WriteBitsMax,
+                        _ => Modbus.ModbusLimits.WriteRegsMax,
+                    };
+                    if (push.Count < 1 || push.Count > max)
+                    {
+                        errors.Add(new ConfigError(path,
+                            $"push.count value {push.Count} is out of range 1..{max} in {pctx}"));
+                    }
+                }
+                if (push.RemoteOffset < 0 || push.RemoteOffset > ushort.MaxValue)
+                {
+                    errors.Add(new ConfigError(path,
+                        $"push.remote_offset value {push.RemoteOffset} is out of range 0..65535 in {pctx}"));
+                }
+                if (push.LocalOffset < 0 || push.LocalOffset > ushort.MaxValue)
+                {
+                    errors.Add(new ConfigError(path,
+                        $"push.local_offset value {push.LocalOffset} is out of range 0..65535 in {pctx}"));
+                }
+                var table = CheckLocalKind(push.LocalKind, push.Fc, isBit, "push", pctx, path, errors);
+                // the local range is read on every push: it must exist on the device
+                if (device is not null && table is { } t && push.Count >= 1 && push.LocalOffset >= 0)
+                {
+                    int length = t switch
+                    {
+                        TableKind.Coil => device.Coils,
+                        TableKind.DiscreteInput => device.Discrete,
+                        TableKind.HoldingRegister => device.Holding,
+                        _ => device.Input,
+                    };
+                    if (push.LocalOffset + push.Count > length)
+                    {
+                        errors.Add(new ConfigError(path,
+                            $"push local_offset {push.LocalOffset} (+{push.Count} cells) exceeds device \"{device.Name}\" " +
+                            $"{push.LocalKind} length {length} in {pctx}"));
+                    }
                 }
             }
         }
 
         // device references resolve
-        var deviceNames = config.Device.Select(d => d.Name).ToHashSet(StringComparer.Ordinal);
         foreach (var client in config.Client)
         {
-            if (client.Device.Length > 0 && !deviceNames.Contains(client.Device))
+            if (client.Device.Length > 0 && !devices.ContainsKey(client.Device))
             {
                 errors.Add(new ConfigError(path,
                     $"[client \"{client.Name}\"] references device \"{client.Device}\" which is not declared"));
@@ -310,7 +340,29 @@ public static partial class ConfigLoader
         }
     }
 
-    private static bool IsBitLocalKind(string kind) => kind is "coil" or "discrete";
+    /// <summary>local_kind must spell a table whose bitness matches the fc. Returns the table when valid.</summary>
+    private static TableKind? CheckLocalKind(string? kind, int fc, bool isBit, string key, string ctx,
+        string path, List<ConfigError> errors)
+    {
+        if (kind is null)
+        {
+            return null; // invalid fc: no default, reported above
+        }
+        if (!LocalKinds.TryParse(kind, out var table))
+        {
+            errors.Add(new ConfigError(path,
+                $"{key}.local_kind value \"{kind}\" is invalid (coil|discrete|holding|input) in {ctx}"));
+            return null;
+        }
+        if (table.IsBit() != isBit)
+        {
+            errors.Add(new ConfigError(path, isBit
+                ? $"bit fc {fc} requires a bit local kind (coil|discrete) in {ctx}"
+                : $"word fc {fc} requires a word local kind (holding|input) in {ctx}"));
+            return null;
+        }
+        return table;
+    }
 
     private static bool TryParseOpcUaEndpoint(string value)
     {

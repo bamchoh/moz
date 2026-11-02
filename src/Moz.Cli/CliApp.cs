@@ -150,7 +150,8 @@ public static class CliApp
                 loggerFactory.CreateLogger($"moz.script.{s.Name}")));
         }
 
-        // client pollers (phase 6): moz as master mirrors remote slaves into local devices
+        // client pollers (phase 6): moz as master mirrors remote slaves into local
+        // devices (poll) and writes local changes back (push)
         foreach (var c in config.Client)
         {
             runners.Add(new ModbusClientPoller(
@@ -161,7 +162,8 @@ public static class CliApp
                 c.TimeoutMs,
                 devices[c.Device],
                 c.Poll.Select(p => new PollEntry(p.Fc, p.RemoteOffset, p.Count, p.EffectiveLocalTable(), p.LocalOffset)).ToArray(),
-                loggerFactory.CreateLogger($"moz.client.{c.Name}")));
+                loggerFactory.CreateLogger($"moz.client.{c.Name}"),
+                c.Push.Select(p => new PushEntry(p.Fc, p.EffectiveLocalTable(), p.LocalOffset, p.Count, p.RemoteOffset)).ToArray()));
         }
 
         foreach (var s in config.Server)

@@ -70,6 +70,72 @@ public class ClientTests
         // count=3 → bc must be 1; here bc=2
         Assert.ThrowsAny<Exception>(() => ModbusClient.ParseBitResponse(1, 3, Hex.ToBytes("010201")));
     }
+
+    // --- write request building (push mirror) ------------------------------------
+
+    [Theory]
+    [InlineData(5, 0x00AC, new[] { true }, "0500ACFF00")]             // FC05 ON
+    [InlineData(5, 0x0001, new[] { false }, "0500010000")]            // FC05 OFF
+    [InlineData(15, 0x0013, new[] { true, false, true, true, false, false, true, true, true, false }, "0F0013000A02CD01")] // spec example (LSB-first)
+    [InlineData(15, 0, new[] { true }, "0F00000001" + "0101")]
+    public void BuildWriteRequest_Bits_ByteExact(int fc, int offset, bool[] bits, string expectedHex)
+    {
+        Assert.Equal(expectedHex, Hex.ToHex(ModbusClient.BuildWriteRequest(fc, offset, bits)));
+    }
+
+    [Theory]
+    [InlineData(6, 0x0001, new ushort[] { 0x0003 }, "0600010003")]                      // FC06
+    [InlineData(16, 0x0001, new ushort[] { 0x000A, 0x0102 }, "10000100020400" + "0A0102")] // FC16 spec example
+    public void BuildWriteRequest_Words_ByteExact(int fc, int offset, ushort[] words, string expectedHex)
+    {
+        Assert.Equal(expectedHex, Hex.ToHex(ModbusClient.BuildWriteRequest(fc, offset, words)));
+    }
+
+    [Theory]
+    [InlineData(1, 0, 1)]     // read FC as a push — writes only
+    [InlineData(5, 0, 2)]     // single-bit FC with 2 bits
+    [InlineData(15, 0, 0)]    // zero bits
+    [InlineData(15, 0, 1969)] // over bit write limit
+    [InlineData(15, -1, 1)]
+    [InlineData(15, 0x10000, 1)]
+    public void BuildWriteRequest_Bits_RejectsInvalid(int fc, int offset, int count)
+    {
+        Assert.ThrowsAny<Exception>(() => ModbusClient.BuildWriteRequest(fc, offset, new bool[count]));
+    }
+
+    [Theory]
+    [InlineData(3, 0, 1)]     // read FC
+    [InlineData(5, 0, 1)]     // bit FC with words
+    [InlineData(6, 0, 2)]     // single-word FC with 2 words
+    [InlineData(16, 0, 0)]
+    [InlineData(16, 0, 124)]  // over word write limit
+    public void BuildWriteRequest_Words_RejectsInvalid(int fc, int offset, int count)
+    {
+        Assert.ThrowsAny<Exception>(() => ModbusClient.BuildWriteRequest(fc, offset, new ushort[count]));
+    }
+
+    [Theory]
+    [InlineData("0500ACFF00", 5, 0x00AC, 1)]  // echo
+    [InlineData("0600010003", 6, 1, 1)]
+    [InlineData("0F0013000A", 15, 0x0013, 10)]
+    [InlineData("1000010002", 16, 1, 2)]
+    public void CheckWriteResponse_AcceptsEcho(string pduHex, int fc, int offset, int count)
+    {
+        ModbusClient.CheckWriteResponse(fc, offset, count, Hex.ToBytes(pduHex)); // no throw
+    }
+
+    [Theory]
+    [InlineData("900200", 16, 1, 2)]      // exception response
+    [InlineData("1000010003", 16, 1, 2)]  // qty mismatch
+    [InlineData("1000020002", 16, 1, 2)]  // addr mismatch
+    [InlineData("0F00010002", 16, 1, 2)]  // fc mismatch
+    [InlineData("0600020003", 6, 1, 1)]   // single write: addr mismatch
+    [InlineData("10", 16, 1, 2)]          // too short
+    [InlineData("100001000200", 16, 1, 2)]// too long
+    public void CheckWriteResponse_RejectsInvalid(string pduHex, int fc, int offset, int count)
+    {
+        Assert.ThrowsAny<Exception>(() => ModbusClient.CheckWriteResponse(fc, offset, count, Hex.ToBytes(pduHex)));
+    }
 }
 
 /// <summary>Hex helpers kept next to the tests that use them.</summary>

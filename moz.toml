@@ -86,6 +86,14 @@ remote_offset = 0
 count = 2
 local_offset = 0
 
+# push (phase 9): plc-mirror holding 20..21 is written to plc-a holding 20..21
+# once at startup and again whenever those local cells change
+[[client.push]]
+fc = 16
+local_offset = 20
+count = 2
+remote_offset = 20
+
 [[server]]
 name = "sim-a"
 protocol = "modbus-tcp"

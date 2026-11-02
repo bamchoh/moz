@@ -192,8 +192,8 @@ public sealed class ScriptConfig
 
 /// <summary>
 /// moz as Modbus master (phase 6): polls a remote slave on an interval and
-/// mirrors the answers into one local device (read-only mirroring; writes
-/// back to the remote come in a later phase).
+/// mirrors the answers into one local device ([[client.poll]]); writes
+/// local changes back to the remote ([[client.push]]).
 /// </summary>
 public sealed class ClientConfig
 {
@@ -222,6 +222,9 @@ public sealed class ClientConfig
 
     [TomlPropertyName("poll")]
     public List<PollConfig> Poll { get; set; } = [];
+
+    [TomlPropertyName("push")]
+    public List<PushConfig> Push { get; set; } = [];
 
     [TomlExtensionData]
     public IDictionary<string, object?>? Extra { get; set; }
@@ -252,22 +255,77 @@ public sealed class PollConfig
     [TomlExtensionData]
     public IDictionary<string, object?>? Extra { get; set; }
 
-    /// <summary>The local table derived from fc (validation ensures kind consistency).</summary>
-    public TableKind EffectiveLocalTable() => (LocalKind ?? Fc switch
+    /// <summary>Default local_kind for a read fc; null for an invalid fc.</summary>
+    public static string? DefaultLocalKind(int fc) => fc switch
     {
         1 => "coil",
         2 => "discrete",
         3 => "holding",
         4 => "input",
-        _ => throw new FormatException($"invalid fc {Fc}"),
-    }) switch
-    {
-        "coil" => TableKind.Coil,
-        "discrete" => TableKind.DiscreteInput,
-        "holding" => TableKind.HoldingRegister,
-        "input" => TableKind.InputRegister,
-        _ => throw new FormatException($"invalid local_kind \"{LocalKind}\""),
+        _ => null,
     };
+
+    /// <summary>The local table derived from fc (validation ensures kind consistency).</summary>
+    public TableKind EffectiveLocalTable() =>
+        LocalKinds.ToTable(LocalKind ?? DefaultLocalKind(Fc) ?? throw new FormatException($"invalid fc {Fc}"));
+}
+
+/// <summary>One [[client.push]] line: local cells written to the remote on change.</summary>
+public sealed class PushConfig
+{
+    /// <summary>5|6|15|16 (write FCs only). Default 16 (write multiple registers).</summary>
+    [TomlPropertyName("fc")]
+    public int Fc { get; set; } = 16;
+
+    /// <summary>Local table: coil|discrete|holding|input. Default derived from fc.</summary>
+    [TomlPropertyName("local_kind")]
+    public string? LocalKind { get; set; }
+
+    /// <summary>First address of the local table.</summary>
+    [TomlPropertyName("local_offset")]
+    public int LocalOffset { get; set; }
+
+    /// <summary>Number of cells (bits or words). Default 1; fc 5/6 require 1.</summary>
+    [TomlPropertyName("count")]
+    public int Count { get; set; } = 1;
+
+    /// <summary>First address on the remote slave.</summary>
+    [TomlPropertyName("remote_offset")]
+    public int RemoteOffset { get; set; }
+
+    [TomlExtensionData]
+    public IDictionary<string, object?>? Extra { get; set; }
+
+    /// <summary>Default local_kind for a write fc; null for an invalid fc.</summary>
+    public static string? DefaultLocalKind(int fc) => fc switch
+    {
+        5 or 15 => "coil",
+        6 or 16 => "holding",
+        _ => null,
+    };
+
+    /// <summary>The local table derived from fc (validation ensures kind consistency).</summary>
+    public TableKind EffectiveLocalTable() =>
+        LocalKinds.ToTable(LocalKind ?? DefaultLocalKind(Fc) ?? throw new FormatException($"invalid fc {Fc}"));
+}
+
+/// <summary>local_kind spelling shared by poll and push.</summary>
+public static class LocalKinds
+{
+    public static bool TryParse(string kind, out TableKind table)
+    {
+        switch (kind)
+        {
+            case "coil": table = TableKind.Coil; return true;
+            case "discrete": table = TableKind.DiscreteInput; return true;
+            case "holding": table = TableKind.HoldingRegister; return true;
+            case "input": table = TableKind.InputRegister; return true;
+            default: table = default; return false;
+        }
+    }
+
+    public static TableKind ToTable(string kind) =>
+        TryParse(kind, out var table) ? table : throw new FormatException($"invalid local_kind \"{kind}\"");
 }
 
 public sealed class ServerConfig

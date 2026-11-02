@@ -138,7 +138,7 @@ idle_gap_ms = 50        # RTU フレームのアイドル区切り (省略: 50; 
 
 ## [[client]] — クライアント (マスタ): リモートスレーブのミラー
 
-moz が Modbus TCP マスタとして動作し、リモートスレーブを周期ポーリングして答えをローカル device にコピーする (フェーズ 6)。v1 は**読み取り専用**ミラー (リモート → ローカル)。
+moz が Modbus TCP マスタとして動作し、リモートスレーブを周期ポーリングして答えをローカル device にコピーし (`[[client.poll]]`、リモート → ローカル)、ローカル device の変更をリモートへ書き戻す (`[[client.push]]`、ローカル → リモート)。1 つの `[[client]]` は 1 本の持続 TCP 接続を poll と push で共用する。
 
 ```toml
 [[device]]
@@ -158,11 +158,28 @@ remote_offset = 100     # リモートの開始アドレス
 count         = 10      # 読み取り点数 (ワード FC: 1..125, ビット FC: 1..2000)
 local_kind    = "holding"  # 省略可: fc から推測 (fc1→coil, fc2→discrete, fc3→holding, fc4→input)
 local_offset  = 0       # ローカル device の開始アドレス
+
+[[client.push]]
+fc            = 16      # 書き込み FC: 5 | 6 | 15 | 16 (省略: 16)
+local_kind    = "holding"  # 省略可: fc から推測 (fc5/15→coil, fc6/16→holding)。discrete/input を読み取り元にしてもよい
+local_offset  = 20      # ローカル device の開始アドレス (この範囲を監視する)
+count         = 2       # 点数 (fc5/6: 1 固定、fc15: 1..1968、fc16: 1..123)
+remote_offset = 20      # リモートの開始アドレス
 ```
+
+poll (リモート → ローカル):
 
 - `local_kind` は fc と同じ大きさ (ビット/ワード) でなければエラー。例: リモートの holding をローカルの input として公開する等の用途で指定する
 - ミラーは 1 回の poll につき 1 回の device 書き込み (= 1 つの変数変更イベント)
 - 接続・タイムアウト・例外応答・解析エラーはすべて WARN ログ 1 行で、次の tick は普通に動く。通信エラーがあってもプロセスは止まらない
+
+push (ローカル → リモート):
+
+- 起動時に全 push を 1 回送る (初期同期: ローカルの現在値をリモートへ)。以降はローカル範囲が変更されるたび (`Watch` 通知) に、ポーリング周期を待たず即座に範囲全体を書く。1 回のローカル変更につき 1 要求、送信中に再度変更されればもう 1 回
+- poll が自分で書いたローカル変更は push しない。同じセルを poll と push の両方に書けば双方向ミラーになる (エコーループは起きない)。ただし初期同期はローカル → リモートの向きなので、ローカルが 0 のまま起動するとリモートの値を 0 で上書きする点に注意
+- 通信エラー (接続失敗・タイムアウト・不正応答・応答のアドレス/点数不一致) は WARN ログ 1 行、接続を切り、未送達のまま次 tick に再送する。リモートの例外応答は `exc=` 付きの Request ログ 1 行で、再送はしない (次のローカル変更で再試行)
+- 要求は `fc` で指定した形そのまま (fc5/6 は 1 点固定の単一書き込み、fc15/16 は複数書き込み)。IndexRange/部分書き込みはない
+- 検証: fc が 5|6|15|16、count が fc の上限内、`local_kind` のビット/ワード整合、ローカル範囲が device の長さに収まること (push は毎回ローカルを読むため `push local_offset 20 (+4 cells) exceeds device ... length` で設定エラー)、不明キー
 
 ## [[script]] — 周期スクリプト
 
@@ -197,6 +214,9 @@ interval_ms = 500       # 100..3600000 (省略: 1000)
 | client.timeout_ms | 10 .. 600000 |
 | client.poll[].fc | 1 .. 4 |
 | client.poll[].count | ワード FC: 1 .. 125、ビット FC: 1 .. 2000 |
+| client.push[].fc | 5, 6, 15, 16 |
+| client.push[].count | fc 5/6: 1、fc 15: 1 .. 1968、fc 16: 1 .. 123 |
+| client.push[].local_offset + count | device の該当テーブル長以内 |
 | script.interval_ms | 100 .. 3600000 |
 | log.level | trace/debug/info/warn/error |
 | log.format | text/json |

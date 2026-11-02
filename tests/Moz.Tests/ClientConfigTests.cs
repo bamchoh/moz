@@ -177,4 +177,108 @@ public class ClientConfigTests : IDisposable
         Assert.Equal(1, polls[1].Fc);
         Assert.Equal(16, polls[1].LocalOffset);
     }
+
+    // --- [[client.push]] -------------------------------------------------------------
+
+    private const string PushBase = Base + """
+
+        [[client.push]]
+        local_offset = 20
+        count = 4
+        remote_offset = 200
+        """;
+
+    [Fact]
+    public void Push_Loads_WithDefaults()
+    {
+        var result = Load("push.toml", PushBase);
+        Assert.True(result.Ok, string.Join("\n", result.Errors));
+        var push = Assert.Single(result.Config!.Client[0].Push);
+        Assert.Equal(16, push.Fc);               // default: write multiple registers
+        Assert.Equal("holding", push.LocalKind); // derived from fc
+        Assert.Equal(20, push.LocalOffset);
+        Assert.Equal(4, push.Count);
+        Assert.Equal(200, push.RemoteOffset);
+        Assert.Equal(Moz.Devices.TableKind.HoldingRegister, push.EffectiveLocalTable());
+    }
+
+    [Theory]
+    [InlineData(5, "coil")]
+    [InlineData(15, "coil")]
+    [InlineData(6, "holding")]
+    public void Push_LocalKind_Derived_From_Fc(int fc, string kind)
+    {
+        var toml = PushBase.Replace("count = 4", $"fc = {fc}\n        count = 1");
+        var result = Load("pushkind.toml", toml);
+        Assert.True(result.Ok, string.Join("\n", result.Errors));
+        Assert.Equal(kind, result.Config!.Client[0].Push[0].LocalKind);
+    }
+
+    [Theory]
+    [InlineData(3)]   // read FC — writes only
+    [InlineData(99)]
+    public void Push_Fc_MustBeWrite(int fc)
+    {
+        var toml = PushBase.Replace("count = 4", $"fc = {fc}\n        count = 1");
+        var result = Load("pushfc.toml", toml);
+        Assert.False(result.Ok);
+        Assert.Contains(result.Errors, e => e.Message.Contains($"push.fc value {fc}"));
+    }
+
+    [Theory]
+    [InlineData(5, 2, "1..1")]
+    [InlineData(6, 2, "1..1")]
+    [InlineData(15, 1969, "1..1968")]
+    [InlineData(16, 124, "1..123")]
+    [InlineData(16, 0, "1..123")]
+    public void Push_Count_Bounds(int fc, int count, string range)
+    {
+        var toml = PushBase.Replace("count = 4", $"fc = {fc}\n        count = {count}");
+        var result = Load("pushcount.toml", toml);
+        Assert.False(result.Ok);
+        Assert.Contains(result.Errors, e => e.Message.Contains($"push.count value {count} is out of range {range}"));
+    }
+
+    [Theory]
+    [InlineData(16, "coil", "word fc 16 requires a word local kind")]
+    [InlineData(15, "holding", "bit fc 15 requires a bit local kind")]
+    [InlineData(16, "nope", "push.local_kind value \"nope\" is invalid")]
+    public void Push_LocalKind_Bitness_MustMatch_Fc(int fc, string kind, string why)
+    {
+        var toml = PushBase.Replace("count = 4", $"fc = {fc}\n        count = 1\n        local_kind = \"{kind}\"");
+        var result = Load("pushbit.toml", toml);
+        Assert.False(result.Ok);
+        Assert.Contains(result.Errors, e => e.Message.Contains(why));
+    }
+
+    [Fact]
+    public void Push_LocalRange_MustFitDevice()
+    {
+        var toml = PushBase.Replace("name = \"plc-mirror\"", "name = \"plc-mirror\"\n        holding = 22");
+        var result = Load("pushrange.toml", toml);
+        Assert.False(result.Ok);
+        Assert.Contains(result.Errors, e => e.Message.Contains("push local_offset 20 (+4 cells) exceeds device \"plc-mirror\" holding length 22"));
+    }
+
+    [Fact]
+    public void Push_UnknownKey_Fails()
+    {
+        var toml = PushBase.Replace("count = 4", "count = 4\n        bogus = 1");
+        var result = Load("pushextra.toml", toml);
+        Assert.False(result.Ok);
+        Assert.Contains(result.Errors, e => e.Message.Contains("bogus"));
+    }
+
+    [Fact]
+    public void Push_TwoEntries_Bind()
+    {
+        var toml = PushBase + "\n[[client.push]]\nfc = 15\nlocal_offset = 0\ncount = 8\nremote_offset = 300\n";
+        var result = Load("twopushes.toml", toml);
+        Assert.True(result.Ok, string.Join("\n", result.Errors));
+        var pushes = result.Config!.Client[0].Push;
+        Assert.Equal(2, pushes.Count);
+        Assert.Equal(16, pushes[0].Fc);
+        Assert.Equal(15, pushes[1].Fc);
+        Assert.Equal(300, pushes[1].RemoteOffset);
+    }
 }
