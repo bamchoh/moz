@@ -86,8 +86,9 @@ remote_offset = 0
 count = 2
 local_offset = 0
 
-# push (phase 9): plc-mirror holding 20..21 is written to plc-a holding 20..21
-# once at startup and again whenever those local cells change
+# push (phase 9): plc-a holding 20..21 is read into plc-mirror at startup
+# (the remote is the truth), then every change of plc-mirror holding 20..21
+# is written back to plc-a holding 20..21
 [[client.push]]
 fc = 16
 local_offset = 20

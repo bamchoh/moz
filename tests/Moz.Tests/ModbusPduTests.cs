@@ -286,4 +286,20 @@ public class ModbusPduTests
         // overflow check must also reject addr+qty > length (device length small)
         Assert.Equal("8302", Run("03FFF00010", new Device("t", holdingRegisters: 100)).Response);
     }
+
+    /// <summary>
+    /// Connections reuse one response buffer: a bit read after a register read
+    /// must not OR its bits into the previous response's bytes.
+    /// </summary>
+    [Fact]
+    public void ReadBits_ClearsStaleResponseBytes()
+    {
+        var device = new Device("t");
+        device.Seed(TableKind.DiscreteInput, 0, new[] { true, false, true });
+        var resp = new byte[300];
+        Array.Fill(resp, (byte)0xBE); // leftovers of an earlier FC04 response
+        var outcome = ModbusPdu.Handle(Hex("02 0000 0003"), device, resp);
+        Assert.Equal(0, outcome.ExceptionCode);
+        Assert.Equal("020105", ToHex(resp, outcome.Length));
+    }
 }

@@ -109,15 +109,53 @@ public class ClientPollerTests
         await remote.DisposeAsync();
     }
 
+    /// <summary>fc2/fc4 default to the read-only local tables: the mirror must still land there (and notify).</summary>
+    [Fact]
+    public async Task Poll_MirrorsIntoReadOnlyLocalTables_AndNotifies()
+    {
+        var remote = await TestServer.Start(); // discrete [true,false,true], input 0 = 0xBEEF
+        var local = new Device("local");
+        var polls = new[]
+        {
+            new PollEntry(2, 0, 3, TableKind.DiscreteInput, 0),
+            new PollEntry(4, 0, 1, TableKind.InputRegister, 0),
+        };
+        int notified = 0;
+        using var watch = local.Watch(TableKind.InputRegister, 0, 1, _ => Interlocked.Increment(ref notified));
+        var poller = new ModbusClientPoller("p", IPEndPointOf(remote.Port), 1,
+            50, 2000, local, polls, NullLogger.Instance);
+
+        using var cts = new CancellationTokenSource();
+        var task = poller.RunAsync(cts.Token);
+        await Task.Delay(300);
+        Assert.True(poller.IsConnected); // no exception poisoned the connection
+        await cts.CancelAsync();
+        await task;
+
+        var bits = new bool[4];
+        local.Read(TableKind.DiscreteInput, 0, bits);
+        Assert.Equal([true, false, true, false], bits);
+        var w = new ushort[1];
+        local.Read(TableKind.InputRegister, 0, w);
+        Assert.Equal((ushort)0xBEEF, w[0]);
+        Assert.True(Volatile.Read(ref notified) >= 1);
+    }
+
     // --- push mirror (local → remote) ------------------------------------------------
+    //
+    // Startup: the remote is the truth. Each push entry first READS its remote
+    // range into the local device (no push), then local changes are written back.
 
     [Fact]
-    public async Task Push_InitialSync_ThenLocalChange_WritesRemoteHolding()
+    public async Task Push_StartsByReadingRemote_ThenLocalChange_WritesRemote()
     {
         var remote = await TestServer.Start(); // holding 200 cells
+        remote.Device.Seed(TableKind.HoldingRegister, 50, new ushort[] { 0xAAAA, 0xBBBB });
         var local = new Device("local", holdingRegisters: 100);
-        local.Write(TableKind.HoldingRegister, 10, new ushort[] { 0x1111, 0x2222 });
+        local.Write(TableKind.HoldingRegister, 10, new ushort[] { 0x1111, 0x2222 }); // stale local state
         var pushes = new[] { new PushEntry(16, TableKind.HoldingRegister, 10, 2, 50) };
+        int remoteWrites = 0;
+        using var watch = remote.Device.Watch(TableKind.HoldingRegister, 50, 2, _ => Interlocked.Increment(ref remoteWrites));
         var poller = new ModbusClientPoller("p", IPEndPointOf(remote.Port), 1,
             50, 2000, local, [], NullLogger.Instance, pushes);
 
@@ -126,13 +164,16 @@ public class ClientPollerTests
         await Task.Delay(300);
 
         var w = new ushort[2];
-        remote.Device.Read(TableKind.HoldingRegister, 50, w);
-        Assert.Equal([0x1111, 0x2222], w); // initial sync
+        local.Read(TableKind.HoldingRegister, 10, w);
+        Assert.Equal([0xAAAA, 0xBBBB], w);                 // remote → local at startup
+        Assert.Equal(0, Volatile.Read(ref remoteWrites));   // nothing pushed yet
+        Assert.False(poller.HasPendingPush);
 
         local.Write(TableKind.HoldingRegister, 10, new ushort[] { 0x3333, 0x4444 });
         await Task.Delay(300);
         remote.Device.Read(TableKind.HoldingRegister, 50, w);
-        Assert.Equal([0x3333, 0x4444], w); // change pushed
+        Assert.Equal([0x3333, 0x4444], w);                  // change pushed
+        Assert.Equal(1, Volatile.Read(ref remoteWrites));
 
         await cts.CancelAsync();
         await task;
@@ -143,10 +184,9 @@ public class ClientPollerTests
     public async Task Push_Bits_FC15_And_FC5_And_FC6()
     {
         var remote = await TestServer.Start();
+        remote.Device.Seed(TableKind.Coil, 100, new[] { false, true, false });
         var local = new Device("local");
-        local.Write(TableKind.Coil, 0, new[] { true, false, true });
-        local.Write(TableKind.Coil, 5, new[] { true });
-        local.Write(TableKind.HoldingRegister, 7, new ushort[] { 0xBEEF });
+        local.Write(TableKind.Coil, 0, new[] { true, true, true }); // overwritten by the startup read
         var pushes = new[]
         {
             new PushEntry(15, TableKind.Coil, 0, 3, 100),
@@ -158,6 +198,13 @@ public class ClientPollerTests
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
+        await Task.Delay(300);
+        Assert.False(local.ReadBit(TableKind.Coil, 0)); // remote's [false,true,false] landed locally
+        Assert.True(local.ReadBit(TableKind.Coil, 1));
+
+        local.Write(TableKind.Coil, 0, new[] { true, false, true });
+        local.Write(TableKind.Coil, 5, new[] { true });
+        local.Write(TableKind.HoldingRegister, 7, new ushort[] { 0xBEEF });
         await Task.Delay(300);
         await cts.CancelAsync();
         await task;
@@ -172,15 +219,14 @@ public class ClientPollerTests
     }
 
     /// <summary>
-    /// Bidirectional mirror of the same cells: the poll's own local writes
-    /// must not bounce back to the remote as pushes (echo loop).
+    /// Bidirectional mirror of the same cells: neither the startup read nor the
+    /// poll's own local writes may bounce back to the remote as pushes.
     /// </summary>
     [Fact]
-    public async Task Push_PollWrites_DoNotEcho()
+    public async Task Push_StartupReadAndPollWrites_DoNotEcho()
     {
         var remote = await TestServer.Start(); // holding 0..1 = 0x1234, 0xABCD
         var local = new Device("local", holdingRegisters: 100);
-        local.Write(TableKind.HoldingRegister, 0, new ushort[] { 0x1234, 0xABCD }); // same as remote
         var polls = new[] { new PollEntry(3, 0, 2, TableKind.HoldingRegister, 0) };
         var pushes = new[] { new PushEntry(16, TableKind.HoldingRegister, 0, 2, 0) };
         int remoteWrites = 0;
@@ -191,12 +237,14 @@ public class ClientPollerTests
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
         await Task.Delay(400); // many poll cycles
-        Assert.Equal(1, Volatile.Read(ref remoteWrites)); // the initial sync only
+        Assert.Equal(0, Volatile.Read(ref remoteWrites));
+        var w = new ushort[2];
+        local.Read(TableKind.HoldingRegister, 0, w);
+        Assert.Equal([0x1234, 0xABCD], w);
 
         local.Write(TableKind.HoldingRegister, 0, new ushort[] { 0x5555, 0x6666 }); // a "script" write
         await Task.Delay(300);
-        Assert.Equal(2, Volatile.Read(ref remoteWrites));
-        var w = new ushort[2];
+        Assert.Equal(1, Volatile.Read(ref remoteWrites));
         remote.Device.Read(TableKind.HoldingRegister, 0, w);
         Assert.Equal([0x5555, 0x6666], w);
 
@@ -204,8 +252,9 @@ public class ClientPollerTests
         await task;
     }
 
+    /// <summary>Until the remote has been read once it is the truth: local writes made before that are not pushed.</summary>
     [Fact]
-    public async Task Push_RemoteDownThenUp_DeliversPendingWrite()
+    public async Task Push_RemoteDownThenUp_ReadsRemoteFirst_ThenPushesLaterChanges()
     {
         var down = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
         down.Start();
@@ -213,30 +262,66 @@ public class ClientPollerTests
         down.Stop();
 
         var local = new Device("local", holdingRegisters: 100);
-        local.Write(TableKind.HoldingRegister, 0, new ushort[] { 0x7777 });
-        var pushes = new[] { new PushEntry(16, TableKind.HoldingRegister, 0, 1, 20) };
+        local.Write(TableKind.HoldingRegister, 0, new ushort[] { 0x7777 }); // before any connection
+        var pushes = new[] { new PushEntry(16, TableKind.HoldingRegister, 0, 1, 0) };
         var poller = new ModbusClientPoller("p", new IPEndPoint(IPAddress.Loopback, port), 1,
             50, 500, local, [], NullLogger.Instance, pushes);
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
         await Task.Delay(150);
-        Assert.True(poller.HasPendingPush); // could not deliver yet
+        Assert.False(poller.HasPendingPush); // nothing to push before the startup read
 
-        var remote = await TestServer.Start(port: port);
+        var remote = await TestServer.Start(port: port); // holding 0 = 0x1234
         await Task.Delay(400);
+        var w = new ushort[1];
+        local.Read(TableKind.HoldingRegister, 0, w);
+        Assert.Equal((ushort)0x1234, w[0]); // remote won
+        remote.Device.Read(TableKind.HoldingRegister, 0, w);
+        Assert.Equal((ushort)0x1234, w[0]); // and was not overwritten by 0x7777
+
+        local.Write(TableKind.HoldingRegister, 0, new ushort[] { 0x7777 });
+        await Task.Delay(300);
         await cts.CancelAsync();
         await task;
-
-        var w = new ushort[1];
-        remote.Device.Read(TableKind.HoldingRegister, 20, w);
+        remote.Device.Read(TableKind.HoldingRegister, 0, w);
         Assert.Equal((ushort)0x7777, w[0]);
         Assert.False(poller.HasPendingPush);
         await remote.DisposeAsync();
     }
 
     [Fact]
-    public async Task Push_RemoteRangeError_LogsException_KeepsRunning()
+    public async Task Push_CommError_KeepsChangePending_AndRetries()
+    {
+        var remote = await TestServer.Start();
+        var local = new Device("local", holdingRegisters: 100);
+        var pushes = new[] { new PushEntry(16, TableKind.HoldingRegister, 0, 1, 0) };
+        var poller = new ModbusClientPoller("p", IPEndPointOf(remote.Port), 1,
+            50, 300, local, [], NullLogger.Instance, pushes);
+
+        using var cts = new CancellationTokenSource();
+        var task = poller.RunAsync(cts.Token);
+        await Task.Delay(300); // startup read done
+        await remote.DisposeAsync(); // remote goes away
+        await Task.Delay(100);
+
+        local.Write(TableKind.HoldingRegister, 0, new ushort[] { 0x4242 });
+        await Task.Delay(400);
+        Assert.True(poller.HasPendingPush); // undelivered
+
+        var back = await TestServer.Start(port: remote.Port);
+        await Task.Delay(500);
+        await cts.CancelAsync();
+        await task;
+        var w = new ushort[1];
+        back.Device.Read(TableKind.HoldingRegister, 0, w);
+        Assert.Equal((ushort)0x4242, w[0]);
+        Assert.False(poller.HasPendingPush);
+        await back.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Push_RemoteRangeError_OnStartupRead_LogsException_NeverPushes_KeepsPolling()
     {
         var provider = new CapturingProvider();
         var remote = await TestServer.Start(device: new Device("t", holdingRegisters: 10));
@@ -249,12 +334,16 @@ public class ClientPollerTests
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
-        await Task.Delay(300);
+        await Task.Delay(200);
+        local.Write(TableKind.HoldingRegister, 0, new ushort[] { 0x9999 }); // never synced → not pushed
+        await Task.Delay(200);
         await cts.CancelAsync();
         await task;
 
-        Assert.False(poller.HasPendingPush); // the remote answered (exception 02): not retried
-        Assert.Contains(provider.Entries, e => e.EventId == Moz.Logging.CommLog.EventIds.Request.Id && e.Message.Contains("exc=2"));
+        Assert.False(poller.HasPendingPush);
+        Assert.Contains(provider.Entries, e => e.EventId == Moz.Logging.CommLog.EventIds.Request.Id
+            && e.Message.Contains("fc=03 addr=100") && e.Message.Contains("exc=2"));
+        Assert.DoesNotContain(provider.Entries, e => e.Message.Contains("fc=10"));
         var w = new ushort[1];
         local.Read(TableKind.HoldingRegister, 50, w);
         Assert.Equal((ushort)0x1234, w[0]); // polls kept working on the same connection

@@ -148,4 +148,32 @@ public class DeviceTests
         Assert.Equal(1, Volatile.Read(ref a));
         Assert.Equal(1, Volatile.Read(ref b));
     }
+
+    // --- Mirror: owner-side write into any table, with notification ---------------------
+
+    [Fact]
+    public void Mirror_WritesReadOnlyTables_AndNotifiesWatchers()
+    {
+        var device = new Device("d", discreteInputs: 16, inputRegisters: 16);
+        var changes = new List<DeviceChange>();
+        using var w1 = device.Watch(TableKind.DiscreteInput, 0, 4, changes.Add);
+        using var w2 = device.Watch(TableKind.InputRegister, 0, 4, changes.Add);
+
+        device.Mirror(TableKind.DiscreteInput, 1, new[] { true, true });
+        device.Mirror(TableKind.InputRegister, 2, new ushort[] { 0xBEEF });
+
+        Assert.True(device.ReadBit(TableKind.DiscreteInput, 1));
+        Assert.True(device.ReadBit(TableKind.DiscreteInput, 2));
+        var words = new ushort[1];
+        device.Read(TableKind.InputRegister, 2, words);
+        Assert.Equal((ushort)0xBEEF, words[0]);
+        Assert.Equal([new DeviceChange(TableKind.DiscreteInput, 1, 2), new DeviceChange(TableKind.InputRegister, 2, 1)], changes);
+    }
+
+    [Fact]
+    public void Mirror_OutOfRange_Throws()
+    {
+        var device = new Device("d", inputRegisters: 4);
+        Assert.Throws<IndexOutOfRangeException>(() => device.Mirror(TableKind.InputRegister, 3, new ushort[] { 1, 2 }));
+    }
 }

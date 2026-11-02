@@ -120,6 +120,19 @@ public sealed class Device : IDeviceAccess
         }
     }
 
+    /// <summary>
+    /// Owner-side write into ANY table, including the read-only ones, with
+    /// watcher notification: the client mirror lands remote discrete/input
+    /// values here. Like <see cref="Seed"/> it bypasses the read-only rule
+    /// (which exists for Modbus masters, not for the process that owns the
+    /// simulated memory); unlike Seed it dispatches a DeviceChange.
+    /// </summary>
+    internal void Mirror(TableKind table, int index, ReadOnlySpan<bool> src) =>
+        Dispatch(ApplyWrite(table, index, src));
+
+    internal void Mirror(TableKind table, int index, ReadOnlySpan<ushort> src) =>
+        Dispatch(ApplyWrite(table, index, src));
+
     // --- internals -------------------------------------------------------
 
     private bool[] Bits(TableKind table) =>

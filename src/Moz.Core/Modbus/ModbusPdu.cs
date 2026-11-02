@@ -73,6 +73,7 @@ public static class ModbusPdu
         int byteCount = (qty + 7) / 8;
         resp[0] = pdu[0];
         resp[1] = (byte)byteCount;
+        resp.Slice(2, byteCount).Clear(); // the caller reuses resp across requests: no stale bits
         for (int i = 0; i < qty; i++)
         {
             if (bits[i])
