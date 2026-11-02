@@ -136,6 +136,28 @@ public static class CliApp
 
         var runners = new List<IProtocolRunner>();
 
+        // client pollers (phase 6): moz as master mirrors remote slaves into local
+        // devices (poll) and writes local changes back (push). Each poll/push range
+        // is also recorded as a ClientLink so scripts can ask plc.getVariableStatus
+        var links = new Dictionary<string, List<ClientLink>>();
+        foreach (var c in config.Client)
+        {
+            var poller = new ModbusClientPoller(
+                c.Name,
+                ParseRemoteAddr(c.RemoteAddr),
+                (byte)c.RemoteUnit,
+                c.IntervalMs,
+                c.TimeoutMs,
+                devices[c.Device],
+                c.Poll.Select(p => new PollEntry(p.Fc, p.RemoteOffset, p.Count, p.EffectiveLocalTable(), p.LocalOffset)).ToArray(),
+                loggerFactory.CreateLogger($"moz.client.{c.Name}"),
+                c.Push.Select(p => new PushEntry(p.Fc, p.EffectiveLocalTable(), p.LocalOffset, p.Count, p.RemoteOffset)).ToArray());
+            runners.Add(poller);
+            var deviceLinks = links.TryGetValue(c.Device, out var l) ? l : links[c.Device] = [];
+            deviceLinks.AddRange(c.Poll.Select(p => new ClientLink(p.EffectiveLocalTable(), p.LocalOffset, p.Count, () => poller.IsConnected)));
+            deviceLinks.AddRange(c.Push.Select(p => new ClientLink(p.EffectiveLocalTable(), p.LocalOffset, p.Count, () => poller.IsConnected)));
+        }
+
         // periodic scripts (phase 4): paths resolve relative to the config file
         var configDir = Path.GetDirectoryName(Path.GetFullPath(result.File))!;
         foreach (var s in config.Script)
@@ -147,23 +169,8 @@ public static class CliApp
                 s.IntervalMs,
                 device,
                 variableTables[s.Device],
-                loggerFactory.CreateLogger($"moz.script.{s.Name}")));
-        }
-
-        // client pollers (phase 6): moz as master mirrors remote slaves into local
-        // devices (poll) and writes local changes back (push)
-        foreach (var c in config.Client)
-        {
-            runners.Add(new ModbusClientPoller(
-                c.Name,
-                ParseRemoteAddr(c.RemoteAddr),
-                (byte)c.RemoteUnit,
-                c.IntervalMs,
-                c.TimeoutMs,
-                devices[c.Device],
-                c.Poll.Select(p => new PollEntry(p.Fc, p.RemoteOffset, p.Count, p.EffectiveLocalTable(), p.LocalOffset)).ToArray(),
-                loggerFactory.CreateLogger($"moz.client.{c.Name}"),
-                c.Push.Select(p => new PushEntry(p.Fc, p.EffectiveLocalTable(), p.LocalOffset, p.Count, p.RemoteOffset)).ToArray()));
+                loggerFactory.CreateLogger($"moz.script.{s.Name}"),
+                links.TryGetValue(s.Device, out var scriptLinks) ? scriptLinks : null));
         }
 
         foreach (var s in config.Server)

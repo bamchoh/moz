@@ -46,6 +46,22 @@ kind = "holding"
 offset = 0
 type = "real"
 
+# written by scripts/setpoint.js on plc-mirror and pushed to plc-a (see [[client.push]])
+[[variable]]
+name = "setpoint"
+device = "plc-mirror"
+kind = "holding"
+offset = 20
+type = "int"
+
+# where the pushed value lands on plc-a
+[[variable]]
+name = "setpoint-received"
+device = "plc-a"
+kind = "holding"
+offset = 20
+type = "int"
+
 [[variable]]
 name = "pump"
 device = "plc-a"
@@ -73,6 +89,12 @@ device = "plc-a"
 path = "scripts/counter.js"
 interval_ms = 500
 
+[[script]]
+name = "demo-setpoint"
+device = "plc-mirror"
+path = "scripts/setpoint.js"
+interval_ms = 2000
+
 [[client]]
 name = "self-poll"
 device = "plc-mirror"
@@ -86,9 +108,8 @@ remote_offset = 0
 count = 2
 local_offset = 0
 
-# push (phase 9): plc-a holding 20..21 is read into plc-mirror at startup
-# (the remote is the truth), then every change of plc-mirror holding 20..21
-# is written back to plc-a holding 20..21
+# push (phase 9): every change of plc-mirror holding 20..21 (the "setpoint"
+# variable) is written to plc-a holding 20..21; nothing is read back here
 [[client.push]]
 fc = 16
 local_offset = 20

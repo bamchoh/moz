@@ -21,12 +21,12 @@ public sealed class ScriptRunner : IProtocolRunner
     private readonly ILogger _logger;
 
     public ScriptRunner(string name, string path, int intervalMs,
-        IDeviceAccess device, VariableTable variables, ILogger logger)
+        IDeviceAccess device, VariableTable variables, ILogger logger, IReadOnlyList<ClientLink>? links = null)
     {
         Name = name;
         _path = path;
         _intervalMs = intervalMs;
-        _plc = new PlcApi(device, variables);
+        _plc = new PlcApi(device, variables, links);
         _logger = logger;
     }
 
@@ -104,6 +104,8 @@ public sealed class ScriptPlc(Engine engine, PlcApi plc)
         plc.writeVariable(name, value, index);
 
     public string[] getVariables() => plc.getVariables();
+
+    public string getVariableStatus(string name) => plc.getVariableStatus(name);
 
     public bool readBit(string table, int address) => plc.readBit(table, address);
 

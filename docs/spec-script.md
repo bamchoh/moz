@@ -29,6 +29,7 @@ interval_ms = 500         # 100..3600000。省略: 1000
 | `plc.readVariable(name, index)` | 変数値を取得。bool / number / **BigInt** を返す |
 | `plc.writeVariable(name, value, index)` | 変数へ書き込み。型に応じて範囲チェック・エラー |
 | `plc.getVariables()` | 変数名の一覧 (配列)。構造体は葉の名前 (`motor.speed`) で並ぶ |
+| `plc.getVariableStatus(name)` | 変数を覆うクライアント連携の状態: `"local"` / `"connected"` / `"disconnected"` (下記) |
 | `plc.readBit(area, address)` / `plc.writeBit(area, address, value)` | 1 点読み書き (area: coil) |
 | `plc.readWord(area, address)` / `plc.writeWord(area, address, value)` | 1 ワード読み書き (area: holding) |
 
@@ -72,6 +73,26 @@ plc.writeVariable('serial', n);
 // 1 秒ごとに dt を現在時刻へ、time を経過ミリ秒へ更新する
 plc.writeVariable('stamp', new Date());
 plc.writeVariable('elapsed', plc.readVariable('elapsed') + 1000);
+```
+
+## クライアント連携の状態: getVariableStatus
+
+`[[client]]` の poll / push 範囲 (docs/spec-config.md) が変数のセルに重なるとき、その変数は「リモートと連携している」。`plc.getVariableStatus(name)` はその連携の状態を 1 語で返す。
+
+| 戻り値 | 意味 |
+|---|---|
+| `"local"` | どのクライアントの poll / push 範囲にも重ならない。書き込みはローカルで完結する |
+| `"connected"` | 重なるすべての範囲のクライアントがリモートへ接続中。push 範囲なら書き込みは即座にリモートへ届き、poll 範囲なら値は周期的に更新されている |
+| `"disconnected"` | 重なる範囲のクライアントの少なくとも 1 つが未接続。push 範囲への書き込みは未送達として保持され、接続後に送られる。poll 範囲の値は最後に読めた値のまま |
+
+未知の変数名はエラー。典型的な使い方:
+
+```javascript
+if (plc.getVariableStatus('setpoint') === 'connected') {
+  plc.writeVariable('setpoint', 42);   // いまリモートへ届く
+} else {
+  console.log('setpoint link is', plc.getVariableStatus('setpoint'));
+}
 ```
 
 ## 例: scripts/counter.js

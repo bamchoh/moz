@@ -52,7 +52,7 @@ moz moz.toml
 - [x] 型付き名前付き変数 (`[[variable]]`, 変更ログ)
 - [x] スクリプト (JavaScript, 64bit は BigInt で正確)
 - [x] Modbus RTU (シリアル、仮想 COM 無しのメモリ pipe テスト込み)
-- [x] クライアント (マスタ; `[[client]]`, リモートスレーブのミラー + `[[client.push]]` による書き戻し)
+- [x] クライアント (マスタ; `[[client]]`, リモートスレーブのミラー + `[[client.push]]` による書き戻し、`plc.getVariableStatus` で連携状態)
 - [x] OPC UA (in-process; 変数→ノード公開、配列ノード、サブスクリプション通知)
 - [x] 文字列・時刻型 (`string`/`time`/`tod`/`date`/`dt`) と構造体 (`[[struct]]`、葉変数へ展開)
 

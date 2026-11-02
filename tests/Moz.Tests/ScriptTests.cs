@@ -47,13 +47,71 @@ public class ScriptTests : IDisposable
     }
 
     private ScriptRunner MakeRunner(string code, VariableTable vars,
-        CapturingProvider? provider = null, int intervalMs = 1000, string path = "s.js")
+        CapturingProvider? provider = null, int intervalMs = 1000, string path = "s.js",
+        IReadOnlyList<ClientLink>? links = null)
     {
         var scriptPath = WriteScript(path, code);
         var logger = provider is null
             ? NullLogger.Instance
             : provider.CreateLogger("test");
-        return new ScriptRunner("s", scriptPath, intervalMs, vars.Device, vars, logger);
+        return new ScriptRunner("s", scriptPath, intervalMs, vars.Device, vars, logger, links);
+    }
+
+    // --- getVariableStatus: is the variable's client link up? ---------------------
+
+    [Fact]
+    public void GetVariableStatus_Local_WhenNoClientCoversTheVariable()
+    {
+        var (device, vars) = MakeDevice();
+        var plc = new PlcApi(device, vars);
+        Assert.Equal("local", plc.getVariableStatus("temperature"));
+        var linked = new PlcApi(device, vars, [new ClientLink(TableKind.Coil, 0, 10, () => true)]); // other table
+        Assert.Equal("local", linked.getVariableStatus("temperature"));
+    }
+
+    [Fact]
+    public void GetVariableStatus_FollowsTheOverlappingLinks()
+    {
+        var (device, vars) = MakeDevice(); // temperature = holding 0..1 (real), copy = holding 2..3 (real)
+        bool up = true;
+        var plc = new PlcApi(device, vars,
+        [
+            new ClientLink(TableKind.HoldingRegister, 1, 5, () => up),   // overlaps temperature (cells 0..1) and copy
+            new ClientLink(TableKind.HoldingRegister, 2, 1, () => false), // copy only, always down
+        ]);
+        Assert.Equal("connected", plc.getVariableStatus("temperature"));
+        Assert.Equal("disconnected", plc.getVariableStatus("copy")); // one of its links is down
+        up = false;
+        Assert.Equal("disconnected", plc.getVariableStatus("temperature"));
+    }
+
+    [Fact]
+    public void GetVariableStatus_UnknownVariable_Throws()
+    {
+        var (device, vars) = MakeDevice();
+        var plc = new PlcApi(device, vars);
+        Assert.ThrowsAny<KeyNotFoundException>(() => plc.getVariableStatus("nope"));
+    }
+
+    [Fact]
+    public async Task Script_CanGateWritesOnVariableStatus()
+    {
+        var (device, vars) = MakeDevice();
+        bool up = false;
+        var links = new[] { new ClientLink(TableKind.HoldingRegister, 2, 1, () => up) };
+        var runner = MakeRunner(
+            "if (plc.getVariableStatus('copy') === 'connected') { plc.writeVariable('copy', 7.5); } else { plc.writeVariable('temperature', 1.5); }",
+            vars, intervalMs: 100, links: links);
+        using var cts = new CancellationTokenSource();
+        var task = runner.RunAsync(cts.Token);
+        await Task.Delay(250);
+        Assert.Equal(0f, vars.Read<float>("copy"));
+        Assert.Equal(1.5f, vars.Read<float>("temperature"));
+        up = true;
+        await Task.Delay(250);
+        await cts.CancelAsync();
+        await task;
+        Assert.Equal(7.5f, vars.Read<float>("copy"));
     }
 
     // --- typed variable access -------------------------------------------------

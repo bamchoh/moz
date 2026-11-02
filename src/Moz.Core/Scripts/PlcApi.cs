@@ -14,15 +14,24 @@ namespace Moz.Scripts;
 /// table names; both short ("coil", "holding", ...) and long ("coils",
 /// "holdingRegisters", ...) spellings are accepted.
 /// </summary>
+/// <summary>
+/// One client's poll or push range on the device a script runs against,
+/// with that client's live connection state. Composed in the CLI; scripts
+/// only see the status words.
+/// </summary>
+public sealed record ClientLink(TableKind Table, int Offset, int Count, Func<bool> IsConnected);
+
 public sealed class PlcApi
 {
     private readonly IDeviceAccess _device;
     private readonly VariableTable _variables;
+    private readonly IReadOnlyList<ClientLink> _links;
 
-    public PlcApi(IDeviceAccess device, VariableTable variables)
+    public PlcApi(IDeviceAccess device, VariableTable variables, IReadOnlyList<ClientLink>? links = null)
     {
         _device = device ?? throw new ArgumentNullException(nameof(device));
         _variables = variables ?? throw new ArgumentNullException(nameof(variables));
+        _links = links ?? [];
     }
 
     // --- typed variables ----------------------------------------------------
@@ -97,6 +106,30 @@ public sealed class PlcApi
 
     /// <summary>Names of all declared variables (= the OPC UA node list).</summary>
     public string[] getVariables() => _variables.Variables.Select(v => v.Name).ToArray();
+
+    /// <summary>
+    /// State of the client links (poll/push ranges) covering a variable:
+    /// "local" when no link overlaps its cells, "connected" when every
+    /// overlapping link's client is connected, "disconnected" otherwise.
+    /// Scripts use it to decide whether a write will reach the remote (push)
+    /// or whether a mirrored value is fresh (poll).
+    /// </summary>
+    public string getVariableStatus(string name)
+    {
+        var v = _variables.Find(name);
+        int end = v.Offset + v.Cells;
+        bool any = false, allUp = true;
+        foreach (var link in _links)
+        {
+            if (link.Table != v.Table || link.Offset >= end || v.Offset >= link.Offset + link.Count)
+            {
+                continue;
+            }
+            any = true;
+            allUp &= link.IsConnected();
+        }
+        return !any ? "local" : allUp ? "connected" : "disconnected";
+    }
 
     // --- raw memory -----------------------------------------------------------
 
