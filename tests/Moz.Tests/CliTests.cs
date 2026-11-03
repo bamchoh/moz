@@ -95,6 +95,36 @@ public class CliTests : IDisposable
     }
 
     [Fact]
+    public async Task Validate_OpcUaClient_Exits0()
+    {
+        const string toml =
+            """
+            [[device]]
+            name = "mirror"
+            holding = 100
+
+            [[variable]]
+            name = "temperature"
+            device = "mirror"
+            kind = "holding"
+            offset = 0
+            type = "real"
+
+            [[client]]
+            name = "ua-client"
+            protocol = "opcua"
+            device = "mirror"
+            endpoint = "opc.tcp://192.168.0.30:4840"
+
+            [[client.poll]]
+            node = "nsu=urn:moz:ua:ns;s=temp"
+            variable = "temperature"
+            """;
+        var exit = await Moz.Cli.CliApp.Run(["validate", WriteFile("ua-client.toml", toml)]);
+        Assert.Equal(0, exit);
+    }
+
+    [Fact]
     public async Task Validate_McServer_Exits0()
     {
         const string toml =

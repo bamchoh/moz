@@ -208,9 +208,16 @@ public sealed class ClientConfig
     [TomlPropertyName("name")]
     public string Name { get; set; } = "";
 
-    /// <summary>"modbus-tcp" (default) | "modbus-rtu" | "mc-3e" (validated by ConfigLoader).</summary>
+    /// <summary>"modbus-tcp" (default) | "modbus-rtu" | "mc-3e" | "opcua" (validated by ConfigLoader).</summary>
     [TomlPropertyName("protocol")]
     public string Protocol { get; set; } = "modbus-tcp";
+
+    /// <summary>opcua only: endpoint URL "opc.tcp://host:port" (REQUIRED there, rejected elsewhere).</summary>
+    [TomlPropertyName("endpoint")]
+    public string? Endpoint { get; set; }
+
+    /// <summary>Items address the remote by cells (Modbus / MC) rather than by a local variable (opcua).</summary>
+    public bool IsCellBased => Protocol is "modbus-tcp" or "modbus-rtu" or "mc-3e";
 
     /// <summary>The protocol is a Modbus flavour (fc / remote_offset / remote_unit keys).</summary>
     public bool IsModbus => Protocol is "modbus-tcp" or "modbus-rtu";
@@ -292,17 +299,25 @@ public sealed class PollConfig
     [TomlPropertyName("remote")]
     public string? Remote { get; set; }
 
-    /// <summary>Number of cells (bits or words). Default 1.</summary>
-    [TomlPropertyName("count")]
-    public int Count { get; set; } = 1;
+    /// <summary>opcua: node id ("ns=2;s=Temp", "nsu=urn:x;s=Temp", "i=2258"); required there, rejected elsewhere.</summary>
+    [TomlPropertyName("node")]
+    public string? Node { get; set; }
 
-    /// <summary>Local table: coil|discrete|holding|input. Default derived from fc.</summary>
+    /// <summary>opcua: local (leaf) variable name that receives / provides the node value; required there, rejected elsewhere.</summary>
+    [TomlPropertyName("variable")]
+    public string? Variable { get; set; }
+
+    /// <summary>Modbus / mc-3e: number of cells (bits or words). Default 1 (filled in Load); rejected on opcua (the variable sizes the item).</summary>
+    [TomlPropertyName("count")]
+    public int? Count { get; set; }
+
+    /// <summary>Modbus / mc-3e: local table coil|discrete|holding|input. Default derived from fc / device; rejected on opcua.</summary>
     [TomlPropertyName("local_kind")]
     public string? LocalKind { get; set; }
 
-    /// <summary>First address of the local table.</summary>
+    /// <summary>Modbus / mc-3e: first address of the local table. Default 0 (filled in Load); rejected on opcua.</summary>
     [TomlPropertyName("local_offset")]
-    public int LocalOffset { get; set; }
+    public int? LocalOffset { get; set; }
 
     [TomlExtensionData]
     public IDictionary<string, object?>? Extra { get; set; }
@@ -333,17 +348,25 @@ public sealed class PushConfig
     [TomlPropertyName("remote")]
     public string? Remote { get; set; }
 
-    /// <summary>Local table: coil|discrete|holding|input. Default derived from fc.</summary>
+    /// <summary>opcua: node id; required there, rejected elsewhere.</summary>
+    [TomlPropertyName("node")]
+    public string? Node { get; set; }
+
+    /// <summary>opcua: local (leaf) variable name whose changes are written to the node; required there, rejected elsewhere.</summary>
+    [TomlPropertyName("variable")]
+    public string? Variable { get; set; }
+
+    /// <summary>Modbus / mc-3e: local table coil|discrete|holding|input. Default derived from fc / device; rejected on opcua.</summary>
     [TomlPropertyName("local_kind")]
     public string? LocalKind { get; set; }
 
-    /// <summary>First address of the local table.</summary>
+    /// <summary>Modbus / mc-3e: first address of the local table. Default 0 (filled in Load); rejected on opcua.</summary>
     [TomlPropertyName("local_offset")]
-    public int LocalOffset { get; set; }
+    public int? LocalOffset { get; set; }
 
-    /// <summary>Number of cells (bits or words). Default 1; fc 5/6 require 1.</summary>
+    /// <summary>Modbus / mc-3e: number of cells. Default 1 (filled in Load); fc 5/6 require 1; rejected on opcua.</summary>
     [TomlPropertyName("count")]
-    public int Count { get; set; } = 1;
+    public int? Count { get; set; }
 
     /// <summary>Modbus: first address on the remote slave. Default 0 (filled in Load).</summary>
     [TomlPropertyName("remote_offset")]

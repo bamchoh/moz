@@ -33,7 +33,7 @@ karakuri（先代ツール）の反省を設計指針にしています:
 - **Devices 層**: シミュレート装置のメモリ空間。全プロトコル・OPC UA サーバ・将来の GUI が消費する唯一の表面が `IDeviceAccess`。型付き名前付き変数 (`VariableTable`) はこの上のフラットなオーバーレイ。構造体は設定読込時 (`VariableLayout`) にドット名の葉変数へ展開され、コア層は構造体を知らない
 - **コーデック層 (ModbusPdu)**: request PDU → メモリ操作 → response PDU を純関数で実装。ソケットがなくても単体テスト可能で、TCP/RTU/ASCII で共有される
 - **トランスポート層**: MBAP + TCP。RTU はこの層だけ置き換える（CRC16 + 3.5 文字アイドル + シリアル）
-- **クライアント層 (`Moz.Client`)**: プロトコル非依存の poll/push ループ `ClientPoller` と、プロトコルが実装する `IRemoteDevice` (項目ごとのローカル範囲 + ビット列/ワード列の読み書き)。Modbus は `ModbusRemote` (+ `IMasterLink` で TCP/RTU)、MC プロトコルは `McRemote`。新プロトコルのクライアントは `IRemoteDevice` 1 つ + 設定キー + CLI の switch 1 行で足せる
+- **クライアント層 (`Moz.Client`)**: プロトコル非依存の poll/push ループ `ClientPoller` と、プロトコルが実装する `IRemoteDevice` (項目ごとのローカル範囲 + ビット列/ワード列の読み書き)。Modbus は `ModbusRemote` (+ `IMasterLink` で TCP/RTU)、MC プロトコルは `McRemote`、OPC UA は `OpcUaRemote` (ノード ↔ 型付き変数; 型変換はサーバ側の `UaValueCodec` をスクラッチ device 経由で再利用)。新プロトコルのクライアントは `IRemoteDevice` 1 つ + 設定キー + CLI の switch 1 行で足せる
 
 ## 将来の拡張と seam
 
@@ -76,3 +76,4 @@ karakuri（先代ツール）の反省を設計指針にしています:
 11. RTU マスタ (`[[client]] protocol = "modbus-rtu"`; マスタのトランスポートを `IMasterLink` に分離し TCP/RTU で共有、メモリ pipe で結合テスト) ← **完了**
 12. クライアントの汎用化 + MC プロトコル (`Moz.Client.ClientPoller` / `IRemoteDevice`; `[[client]] protocol = "mc-3e"` で 3E フレーム・バイナリ・TCP のマスタ、`remote = "D100"` 表記) ← **完了**
 13. MC プロトコル サーバ (`[[server]] protocol = "mc-3e"`; `Mc3EServer` 純粋ハンドラ + `McServer` TCP ランナー、`[[server.map]]` でデバイス → メモリ割り当て、既定 D/M/X) ← **完了**
+14. OPC UA クライアント (`[[client]] protocol = "opcua"`; `node` ↔ `variable`、匿名 / None、周期 Read + Write) ← **完了**。サブスクリプション (MonitoredItem による変更通知) は後続フェーズ

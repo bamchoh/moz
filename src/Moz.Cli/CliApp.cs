@@ -126,6 +126,7 @@ public static class CliApp
         // the named access surface scripts and the OPC UA server use
         var variableTables = new Dictionary<string, VariableTable>();
         var structs = ConfigLoader.ToStructDefs(config);
+        var leafIndex = new Dictionary<string, Dictionary<string, Variable>>();
         foreach (var d in config.Device)
         {
             // struct-typed declarations expand into dotted leaf variables here;
@@ -134,6 +135,7 @@ public static class CliApp
                 (Config: v, Leaves: VariableLayout.Expand(v.Name, v.ToTableKind(), v.Offset, v.Type, v.Count, v.Length ?? 0, structs))).ToList();
             variableTables[d.Name] = new VariableTable(
                 devices[d.Name], declared.SelectMany(x => x.Leaves), loggerFactory!.CreateLogger($"moz.device.{d.Name}"));
+            leafIndex[d.Name] = declared.SelectMany(x => x.Leaves).ToDictionary(v => v.Name, StringComparer.Ordinal);
             // initial values (value = ...): seeded before any runner starts, no change log
             foreach (var (v, leaves) in declared)
             {
@@ -153,7 +155,7 @@ public static class CliApp
         foreach (var c in config.Client)
         {
             var clientLogger = loggerFactory.CreateLogger($"moz.client.{c.Name}");
-            var poller = new ClientPoller(c.Name, BuildRemote(c, clientLogger), c.IntervalMs, devices[c.Device], clientLogger);
+            var poller = new ClientPoller(c.Name, BuildRemote(c, leafIndex[c.Device], clientLogger), c.IntervalMs, devices[c.Device], clientLogger);
             runners.Add(poller);
             var deviceLinks = links.TryGetValue(c.Device, out var l) ? l : links[c.Device] = [];
             deviceLinks.AddRange(poller.Remote.Polls.Concat(poller.Remote.Pushes)
@@ -242,7 +244,7 @@ public static class CliApp
     }
 
     /// <summary>The ONE place a [[client]] protocol name becomes an IRemoteDevice.</summary>
-    private static IRemoteDevice BuildRemote(ClientConfig c, ILogger logger)
+    private static IRemoteDevice BuildRemote(ClientConfig c, IReadOnlyDictionary<string, Variable> leaves, ILogger logger)
     {
         switch (c.Protocol)
         {
@@ -255,15 +257,20 @@ public static class CliApp
                         () => OpenSerialPort(c.SerialPort!, c.Baud, c.Parity, c.DataBits, c.StopBits),
                         c.SerialPort!, c.TimeoutMs, c.IdleGapMs);
                 return new ModbusRemote(c.Name, link, (byte)c.RemoteUnit!.Value,
-                    c.Poll.Select(p => new PollEntry(p.Fc!.Value, p.RemoteOffset!.Value, p.Count, p.EffectiveLocalTable(), p.LocalOffset)).ToArray(),
-                    c.Push.Select(p => new PushEntry(p.Fc!.Value, p.EffectiveLocalTable(), p.LocalOffset, p.Count, p.RemoteOffset!.Value)).ToArray(),
+                    c.Poll.Select(p => new PollEntry(p.Fc!.Value, p.RemoteOffset!.Value, p.Count!.Value, p.EffectiveLocalTable(), p.LocalOffset!.Value)).ToArray(),
+                    c.Push.Select(p => new PushEntry(p.Fc!.Value, p.EffectiveLocalTable(), p.LocalOffset!.Value, p.Count!.Value, p.RemoteOffset!.Value)).ToArray(),
                     logger);
             case "mc-3e":
                 return new McRemote(c.Name, ParseRemoteAddr(c.RemoteAddr), c.TimeoutMs,
                     new Mc3EOptions((byte)c.Network!.Value, (byte)c.Pc!.Value, (ushort)c.ModuleIo!.Value, (byte)c.ModuleStation!.Value,
                         Mc3E.TimerUnitsFor(c.TimeoutMs)),
-                    c.Poll.Select(p => McEntryOf(p.Remote!, p.Count, p.EffectiveLocalTable(), p.LocalOffset)).ToArray(),
-                    c.Push.Select(p => McEntryOf(p.Remote!, p.Count, p.EffectiveLocalTable(), p.LocalOffset)).ToArray(),
+                    c.Poll.Select(p => McEntryOf(p.Remote!, p.Count!.Value, p.EffectiveLocalTable(), p.LocalOffset!.Value)).ToArray(),
+                    c.Push.Select(p => McEntryOf(p.Remote!, p.Count!.Value, p.EffectiveLocalTable(), p.LocalOffset!.Value)).ToArray(),
+                    logger);
+            case "opcua":
+                return new OpcUaRemote(c.Name, c.Endpoint!, c.TimeoutMs,
+                    c.Poll.Select(p => new OpcUaEntry(OpcUaRemote.ParseNode(p.Node!), leaves[p.Variable!])).ToArray(),
+                    c.Push.Select(p => new OpcUaEntry(OpcUaRemote.ParseNode(p.Node!), leaves[p.Variable!])).ToArray(),
                     logger);
             default:
                 throw new InvalidOperationException(

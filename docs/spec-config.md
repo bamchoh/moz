@@ -169,13 +169,14 @@ count  = 100             # W0..W99 (省略: offset からテーブルの残り�
 
 moz がマスタ (クライアント) として動作し、リモート機器を周期ポーリングして答えをローカル device にコピーし (`[[client.poll]]`、リモート → ローカル)、ローカル device の変更をリモートへ書き戻す (`[[client.push]]`、ローカル → リモート)。1 つの `[[client]]` は 1 本のリンク (TCP 接続またはシリアルポート) を poll と push で共用する。
 
-`protocol` でプロトコルを選ぶ。poll / push の動き (周期、未送達の保持、エコー抑止、エラー時の再試行) は全プロトコル共通で、**リモート側のアドレス指定だけがプロトコルごとに違う**: Modbus は `fc` + `remote_offset`、MC プロトコルは `remote = "D100"` のようなデバイス表記。無関係なプロトコルのキーを書くとエラーになる。
+`protocol` でプロトコルを選ぶ。poll / push の動き (周期、未送達の保持、エコー抑止、エラー時の再試行) は全プロトコル共通で、**リモート側のアドレス指定だけがプロトコルごとに違う**: Modbus は `fc` + `remote_offset`、MC プロトコルは `remote = "D100"` のようなデバイス表記、OPC UA は `node` + ローカル変数名。無関係なプロトコルのキーを書くとエラーになる。
 
-| protocol | 相手 | 接続キー | poll / push のリモート指定 |
-|---|---|---|---|
-| `modbus-tcp` (省略時) | Modbus TCP スレーブ | `remote_addr`, `remote_unit` | `fc`, `remote_offset` |
-| `modbus-rtu` | Modbus RTU スレーブ (シリアル) | `serial_port` ほかシリアルキー, `remote_unit` | `fc`, `remote_offset` |
-| `mc-3e` | 三菱 MC プロトコル 3E フレーム (バイナリ, TCP) | `remote_addr`, `network`, `pc`, `module_io`, `module_station` | `remote` (デバイス表記) |
+| protocol | 相手 | 接続キー | poll / push のリモート指定 | ローカル側 |
+|---|---|---|---|---|
+| `modbus-tcp` (省略時) | Modbus TCP スレーブ | `remote_addr`, `remote_unit` | `fc`, `remote_offset` | `local_kind`, `local_offset`, `count` |
+| `modbus-rtu` | Modbus RTU スレーブ (シリアル) | `serial_port` ほかシリアルキー, `remote_unit` | `fc`, `remote_offset` | 同上 |
+| `mc-3e` | 三菱 MC プロトコル 3E フレーム (バイナリ, TCP) | `remote_addr`, `network`, `pc`, `module_io`, `module_station` | `remote` (デバイス表記) | 同上 |
+| `opcua` | OPC UA サーバ | `endpoint` | `node` (ノード ID) | `variable` (宣言済み変数名; count/local_* は書かない) |
 
 ```toml
 [[device]]
@@ -234,6 +235,42 @@ local_offset = 0        # local_kind 省略時 coil
 
 - `remote` は mc-3e では必須、Modbus では設定禁止。逆に `fc` / `remote_offset` / `remote_unit` は mc-3e では設定禁止。`network` 等のルーティングキーも mc-3e 以外では禁止
 - 終了コード ≠ 0 (デバイス範囲外など) はリモートの拒否として Request ログに `err=C056` の形で出る。poll は何も書かず、push は再送しない。詳細は docs/spec-mc.md
+
+### OPC UA クライアント (opcua)
+
+リモートのノードを **ローカルの型付き変数** に写す。型・テーブル・オフセット・要素数は `[[variable]]` の宣言から取るので、poll / push には `node` と `variable` だけを書く。
+
+```toml
+[[variable]]
+name = "ua-temperature"
+device = "plc-mirror"
+kind = "holding"
+offset = 70
+type = "real"
+
+[[client]]
+name       = "ua-client"
+protocol   = "opcua"
+device     = "plc-mirror"
+endpoint   = "opc.tcp://192.168.0.30:4840"   # 必須 (opc.tcp://host:port)
+interval_ms = 1000
+timeout_ms  = 5000                            # 接続・Read・Write の各サービス呼び出しの上限
+
+[[client.poll]]
+node     = "ns=2;s=Temperature"               # "ns=2;s=…" / "i=2258" / "nsu=urn:…;s=…" (名前空間 URI 指定も可)
+variable = "ua-temperature"                   # この client の device に宣言された変数 (構造体は葉名 motor.speed)
+
+[[client.push]]
+node     = "nsu=urn:moz:ua:ns;s=setpoint"
+variable = "setpoint"
+```
+
+- 接続は匿名ユーザー・SecurityPolicy None のみ (moz はセキュリティを持たない; サーバが None エンドポイントを出していなければ接続エラー)。クライアント証明書は一時フォルダ (`%TEMP%/moz-ua-client/<client名>`) に自動生成される
+- 読み取りは周期 Read (`interval_ms` ごとに poll 項目を 1 ノードずつ Read サービスで読む)。サブスクリプション (MonitoredItem) は未対応で後続フェーズ。push はローカル変数の変更ごとに Write サービス 1 回
+- 値の変換は OPC UA サーバ側と同じ規則 (docs/spec-config.md の OPC UA 節の型対応: real ↔ Float、int ↔ Int16、date/dt ↔ DateTime、配列 ↔ 一次元配列 …)。ノードの型が変数型と合わないときは `err=BadTypeMismatch`、値域外は `err=BadOutOfRange` としてリモートの拒否扱い (poll は書かず、push は再送しない)。未知のノード・名前空間は `err=BadNodeIdUnknown`
+- `count` / `local_kind` / `local_offset` / `fc` / `remote_offset` / `remote` / `remote_unit` / `remote_addr` は opcua では設定禁止。逆に `node` / `variable` / `endpoint` は opcua 以外では禁止
+- `plc.getVariableStatus` の `"connected"` はセッションが確立していること
+- 接続失敗 (サーバ未起動、None エンドポイント無し、タイムアウト) は WARN ログ 1 行で次周期に再試行。同じ設定ファイル内の moz の OPC UA サーバに接続する場合、サーバの起動が終わるまでの数周期は `BadServerHalted` で失敗し、その後つながる (正常)
 
 ### シリアル (modbus-rtu) マスタ
 
@@ -304,8 +341,11 @@ interval_ms = 500       # 100..3600000 (省略: 1000)
 | variable.value | 型の値域内、配列は count 要素ちょうど、string は length バイト以内 |
 | struct.field.count | 1 .. |
 | struct.field.length | 1 .. 250 (string のみ、必須) |
-| client.protocol | modbus-tcp / modbus-rtu / mc-3e (他はエラー; 省略: modbus-tcp) |
-| client.remote_addr | modbus-tcp / mc-3e で必須、modbus-rtu では禁止 |
+| client.protocol | modbus-tcp / modbus-rtu / mc-3e / opcua (他はエラー; 省略: modbus-tcp) |
+| client.remote_addr | modbus-tcp / mc-3e で必須、modbus-rtu / opcua では禁止 |
+| client.endpoint | opcua で必須 (opc.tcp://host:port)、他では禁止 |
+| client.poll[].node / variable | opcua で必須 (node はノード ID 表記、variable は同じ device の葉変数名)、他では禁止 |
+| client.poll[].count / local_kind / local_offset (push も同じ) | modbus / mc-3e のみ (省略: 1 / fc か device から / 0)、opcua では禁止 |
 | client.serial_port | modbus-rtu で必須、他では禁止 |
 | client.baud / parity / data_bits / stop_bits / idle_gap_ms | server の同名キーと同じ範囲 |
 | client.remote_unit | 0 .. 247 (Modbus のみ; 他では禁止) |

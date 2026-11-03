@@ -55,6 +55,14 @@ kind = "holding"
 offset = 20
 type = "int"
 
+# filled by the OPC UA client "ua-self-poll" below (plc-a temperature via ua-a)
+[[variable]]
+name = "ua-temperature"
+device = "plc-mirror"
+kind = "holding"
+offset = 70
+type = "real"
+
 # where the pushed value lands on plc-a
 [[variable]]
 name = "setpoint-received"
@@ -132,6 +140,19 @@ interval_ms = 1000
 remote = "D0"
 count = 2
 local_offset = 50
+
+# OPC UA client (phase 14): node <-> typed local variable. Polls plc-a's
+# "temperature" node from the ua-a server below into plc-mirror.
+[[client]]
+name = "ua-self-poll"
+protocol = "opcua"
+device = "plc-mirror"
+endpoint = "opc.tcp://127.0.0.1:48400"
+interval_ms = 1000
+
+[[client.poll]]
+node = "nsu=urn:moz:ua:ns;s=temperature"
+variable = "ua-temperature"
 
 # RTU master (phase 11): same poll/push keys, serial keys as on an RTU server.
 # Commented out because it needs a real serial port to open.

@@ -66,6 +66,19 @@ public static partial class ConfigLoader
         }
         foreach (var client in config.Client)
         {
+            if (client.IsCellBased)
+            {
+                foreach (var poll in client.Poll)
+                {
+                    poll.Count ??= 1;
+                    poll.LocalOffset ??= 0;
+                }
+                foreach (var push in client.Push)
+                {
+                    push.Count ??= 1;
+                    push.LocalOffset ??= 0;
+                }
+            }
             if (client.IsModbus)
             {
                 client.RemoteUnit ??= 1;
@@ -115,7 +128,7 @@ public static partial class ConfigLoader
     private static readonly string[] LogLevels = ["trace", "debug", "info", "warn", "error"];
     private static readonly string[] LogFormats = ["text", "json"];
     private static readonly string[] Protocols = ["modbus-tcp", "modbus-rtu", "opcua", "mc-3e"];
-    private static readonly string[] ClientProtocols = ["modbus-tcp", "modbus-rtu", "mc-3e"];
+    private static readonly string[] ClientProtocols = ["modbus-tcp", "modbus-rtu", "mc-3e", "opcua"];
 
     private static void Validate(MozConfig config, string path, List<ConfigError> errors)
     {
@@ -307,6 +320,25 @@ public static partial class ConfigLoader
                         $"client.remote_addr is only valid for modbus-tcp, set in {ctx} ({client.Protocol})"));
                 }
             }
+            else if (client.Protocol == "opcua")
+            {
+                Require(client.Endpoint ?? "", "client.endpoint", path, errors, $"{ctx} (required for opcua)");
+                if (client.Endpoint is { Length: > 0 } ep && !TryParseOpcUaEndpoint(ep))
+                {
+                    errors.Add(new ConfigError(path,
+                        $"client.endpoint value \"{ep}\" is invalid (opc.tcp://host:port, port 1..65535) in {ctx}"));
+                }
+                if (client.RemoteAddr.Length > 0)
+                {
+                    errors.Add(new ConfigError(path,
+                        $"client.remote_addr is only valid for modbus-tcp and mc-3e clients, set in {ctx} ({client.Protocol})"));
+                }
+                if (client.SerialPort is not null)
+                {
+                    errors.Add(new ConfigError(path,
+                        $"client.serial_port is only valid for serial protocols (modbus-rtu), set in {ctx} ({client.Protocol})"));
+                }
+            }
             else
             {
                 Require(client.RemoteAddr, "client.remote_addr", path, errors, ctx);
@@ -321,51 +353,74 @@ public static partial class ConfigLoader
                         $"client.serial_port is only valid for serial protocols (modbus-rtu), set in {ctx} ({client.Protocol})"));
                 }
             }
+            if (client.Protocol != "opcua" && client.Endpoint is not null)
+            {
+                errors.Add(new ConfigError(path, $"client.endpoint is only valid for opcua clients, set in {ctx} ({client.Protocol})"));
+            }
             CheckSerial("client", client.Baud, client.Parity, client.DataBits, client.StopBits, client.IdleGapMs, ctx, path, errors);
 
             devices.TryGetValue(client.Device, out var device);
+            var leaves = client.Protocol == "opcua" ? LeafNames(config, client.Device) : null;
             foreach (var poll in client.Poll)
             {
                 var pctx = $"[[client.poll]] on \"{client.Name}\"";
                 CheckExtra(poll.Extra, pctx, path, errors);
-                if (poll.LocalOffset < 0 || poll.LocalOffset > ushort.MaxValue)
+                if (client.Protocol == "opcua")
+                {
+                    ValidateOpcUaItem("poll", poll.Node, poll.Variable, poll.Count, poll.LocalOffset, poll.LocalKind,
+                        poll.Fc, poll.RemoteOffset, poll.Remote, leaves!, client.Device, pctx, path, errors);
+                    continue;
+                }
+                CheckNotOpcUaKeys("poll", poll.Node, poll.Variable, client.Protocol, pctx, path, errors);
+                int localOffset = poll.LocalOffset!.Value;
+                int count = poll.Count!.Value;
+                if (localOffset < 0 || localOffset > ushort.MaxValue)
                 {
                     errors.Add(new ConfigError(path,
-                        $"poll.local_offset value {poll.LocalOffset} is out of range 0..65535 in {pctx}"));
+                        $"poll.local_offset value {localOffset} is out of range 0..65535 in {pctx}"));
                 }
                 TableKind? table;
                 if (client.IsModbus)
                 {
-                    table = ValidateModbusPoll(poll, pctx, path, errors);
+                    table = ValidateModbusPoll(poll, count, pctx, path, errors);
                 }
                 else
                 {
                     CheckNotModbusKeys("poll", poll.Fc, poll.RemoteOffset, client.Protocol, pctx, path, errors);
-                    table = ValidateMcItem("poll", poll.Remote, poll.Count, poll.LocalKind, pctx, path, errors);
+                    table = ValidateMcItem("poll", poll.Remote, count, poll.LocalKind, pctx, path, errors);
                 }
-                CheckLocalRange("poll", device, table, poll.LocalKind, poll.LocalOffset, poll.Count, pctx, path, errors);
+                CheckLocalRange("poll", device, table, poll.LocalKind, localOffset, count, pctx, path, errors);
             }
 
             foreach (var push in client.Push)
             {
                 var pctx = $"[[client.push]] on \"{client.Name}\"";
                 CheckExtra(push.Extra, pctx, path, errors);
-                if (push.LocalOffset < 0 || push.LocalOffset > ushort.MaxValue)
+                if (client.Protocol == "opcua")
+                {
+                    ValidateOpcUaItem("push", push.Node, push.Variable, push.Count, push.LocalOffset, push.LocalKind,
+                        push.Fc, push.RemoteOffset, push.Remote, leaves!, client.Device, pctx, path, errors);
+                    continue;
+                }
+                CheckNotOpcUaKeys("push", push.Node, push.Variable, client.Protocol, pctx, path, errors);
+                int localOffset = push.LocalOffset!.Value;
+                int count = push.Count!.Value;
+                if (localOffset < 0 || localOffset > ushort.MaxValue)
                 {
                     errors.Add(new ConfigError(path,
-                        $"push.local_offset value {push.LocalOffset} is out of range 0..65535 in {pctx}"));
+                        $"push.local_offset value {localOffset} is out of range 0..65535 in {pctx}"));
                 }
                 TableKind? table;
                 if (client.IsModbus)
                 {
-                    table = ValidateModbusPush(push, pctx, path, errors);
+                    table = ValidateModbusPush(push, count, pctx, path, errors);
                 }
                 else
                 {
                     CheckNotModbusKeys("push", push.Fc, push.RemoteOffset, client.Protocol, pctx, path, errors);
-                    table = ValidateMcItem("push", push.Remote, push.Count, push.LocalKind, pctx, path, errors);
+                    table = ValidateMcItem("push", push.Remote, count, push.LocalKind, pctx, path, errors);
                 }
-                CheckLocalRange("push", device, table, push.LocalKind, push.LocalOffset, push.Count, pctx, path, errors);
+                CheckLocalRange("push", device, table, push.LocalKind, localOffset, count, pctx, path, errors);
             }
         }
 
@@ -443,7 +498,7 @@ public static partial class ConfigLoader
     }
 
     /// <summary>Modbus poll: fc 1..4, count within the read limit, remote_offset 0..65535, local_kind bitness = fc bitness.</summary>
-    private static TableKind? ValidateModbusPoll(PollConfig poll, string pctx, string path, List<ConfigError> errors)
+    private static TableKind? ValidateModbusPoll(PollConfig poll, int count, string pctx, string path, List<ConfigError> errors)
     {
         if (poll.Remote is not null)
         {
@@ -458,9 +513,9 @@ public static partial class ConfigLoader
         else
         {
             int max = isBit ? Modbus.ModbusLimits.ReadBitsMax : Modbus.ModbusLimits.ReadRegsMax;
-            if (poll.Count < 1 || poll.Count > max)
+            if (count < 1 || count > max)
             {
-                errors.Add(new ConfigError(path, $"poll.count value {poll.Count} is out of range 1..{max} in {pctx}"));
+                errors.Add(new ConfigError(path, $"poll.count value {count} is out of range 1..{max} in {pctx}"));
             }
         }
         if (poll.RemoteOffset is < 0 or > ushort.MaxValue)
@@ -471,7 +526,7 @@ public static partial class ConfigLoader
     }
 
     /// <summary>Modbus push: fc 5|6|15|16, count within the write limit (1 for fc 5/6), remote_offset 0..65535, local_kind bitness = fc bitness.</summary>
-    private static TableKind? ValidateModbusPush(PushConfig push, string pctx, string path, List<ConfigError> errors)
+    private static TableKind? ValidateModbusPush(PushConfig push, int count, string pctx, string path, List<ConfigError> errors)
     {
         if (push.Remote is not null)
         {
@@ -491,9 +546,9 @@ public static partial class ConfigLoader
                 15 => Modbus.ModbusLimits.WriteBitsMax,
                 _ => Modbus.ModbusLimits.WriteRegsMax,
             };
-            if (push.Count < 1 || push.Count > max)
+            if (count < 1 || count > max)
             {
-                errors.Add(new ConfigError(path, $"push.count value {push.Count} is out of range 1..{max} in {pctx}"));
+                errors.Add(new ConfigError(path, $"push.count value {count} is out of range 1..{max} in {pctx}"));
             }
         }
         if (push.RemoteOffset is < 0 or > ushort.MaxValue)
@@ -501,6 +556,70 @@ public static partial class ConfigLoader
             errors.Add(new ConfigError(path, $"push.remote_offset value {push.RemoteOffset} is out of range 0..65535 in {pctx}"));
         }
         return CheckLocalKind(push.LocalKind, fc, isBit, "push", pctx, path, errors);
+    }
+
+    /// <summary>Leaf variable names declared on a device (struct declarations expanded); unexpandable declarations are reported by variable validation.</summary>
+    private static HashSet<string> LeafNames(MozConfig config, string deviceName)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        var structs = ToStructDefs(config);
+        foreach (var v in config.Variable.Where(v => v.Device == deviceName))
+        {
+            try
+            {
+                foreach (var leaf in VariableLayout.Expand(v.Name, v.ToTableKind(), v.Offset, v.Type, v.Count, v.Length ?? 0, structs))
+                {
+                    names.Add(leaf.Name);
+                }
+            }
+            catch (Exception)
+            {
+                // invalid declaration: its own error is reported elsewhere
+            }
+        }
+        return names;
+    }
+
+    /// <summary>opcua poll/push: node id text, a declared leaf variable, and none of the cell-based keys.</summary>
+    private static void ValidateOpcUaItem(string key, string? node, string? variable, int? count, int? localOffset, string? localKind,
+        int? fc, int? remoteOffset, string? remote, HashSet<string> leaves, string deviceName, string ctx, string path, List<ConfigError> errors)
+    {
+        Require(node ?? "", $"{key}.node", path, errors, $"{ctx} (e.g. ns=2;s=Temp, nsu=urn:x;s=Temp, i=2258)");
+        if (!string.IsNullOrWhiteSpace(node) && !OpcUa.OpcUaRemote.TryParseNode(node))
+        {
+            errors.Add(new ConfigError(path, $"{key}.node value \"{node}\" is invalid (e.g. ns=2;s=Temp, nsu=urn:x;s=Temp, i=2258) in {ctx}"));
+        }
+        Require(variable ?? "", $"{key}.variable", path, errors, $"{ctx} (a [[variable]] on device \"{deviceName}\")");
+        if (!string.IsNullOrWhiteSpace(variable) && !leaves.Contains(variable))
+        {
+            errors.Add(new ConfigError(path,
+                $"{key}.variable value \"{variable}\" is not declared on device \"{deviceName}\" (struct variables are addressed by leaf name, e.g. motor.speed) in {ctx}"));
+        }
+        foreach (var (set, name) in new[] { (count is not null, "count"), (localOffset is not null, "local_offset"), (localKind is not null, "local_kind") })
+        {
+            if (set)
+            {
+                errors.Add(new ConfigError(path, $"{key}.{name} is only valid for modbus and mc-3e clients (the variable defines the local cells), set in {ctx}"));
+            }
+        }
+        CheckNotModbusKeys(key, fc, remoteOffset, "opcua", ctx, path, errors);
+        if (remote is not null)
+        {
+            errors.Add(new ConfigError(path, $"{key}.remote is only valid for mc-3e clients, set in {ctx} (opcua)"));
+        }
+    }
+
+    /// <summary>opcua keys on a cell-based client are errors, not silently ignored.</summary>
+    private static void CheckNotOpcUaKeys(string key, string? node, string? variable, string protocol, string ctx, string path, List<ConfigError> errors)
+    {
+        if (node is not null)
+        {
+            errors.Add(new ConfigError(path, $"{key}.node is only valid for opcua clients, set in {ctx} ({protocol})"));
+        }
+        if (variable is not null)
+        {
+            errors.Add(new ConfigError(path, $"{key}.variable is only valid for opcua clients, set in {ctx} ({protocol})"));
+        }
     }
 
     /// <summary>Modbus keys on a non-Modbus client are errors, not silently ignored.</summary>
