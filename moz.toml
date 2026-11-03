@@ -118,6 +118,24 @@ local_offset = 20
 count = 2
 remote_offset = 20
 
+# RTU master (phase 11): same poll/push keys, serial keys as on an RTU server.
+# Commented out because it needs a real serial port to open.
+# [[client]]
+# name = "rtu-master"
+# protocol = "modbus-rtu"
+# device = "plc-mirror"
+# serial_port = "COM11"
+# baud = 9600
+# remote_unit = 1
+# interval_ms = 1000
+# timeout_ms = 1000
+#
+# [[client.poll]]
+# fc = 3
+# remote_offset = 0
+# count = 2
+# local_offset = 40
+
 [[server]]
 name = "sim-a"
 protocol = "modbus-tcp"

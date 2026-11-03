@@ -1,5 +1,3 @@
-using System.Net;
-using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
 using Moz.Devices;
 using Moz.Logging;
@@ -13,18 +11,18 @@ public readonly record struct PollEntry(int Fc, int RemoteOffset, int Count, Tab
 public readonly record struct PushEntry(int Fc, TableKind LocalTable, int LocalOffset, int Count, int RemoteOffset);
 
 /// <summary>
-/// moz as Modbus TCP master: connects to a remote slave, mirrors reads into a
-/// local device on a fixed interval (polls) and writes local changes back to
-/// the remote (pushes). One persistent connection; every error (connect,
-/// timeout, exception response) is logged and the loop retries next tick —
-/// never fatal.
+/// moz as Modbus master: talks to a remote slave over an <see cref="IMasterLink"/>
+/// (TCP or RTU), mirrors reads into a local device on a fixed interval
+/// (polls) and writes local changes back to the remote (pushes). One link per
+/// client; every error (connect, timeout, exception response) is logged and
+/// the loop retries next tick — never fatal.
 ///
 /// Push policy: a push reacts to local WRITES only. Nothing is sent at
 /// startup and the remote is never read for a push range (declare a poll
 /// for that). Every local change (<see cref="IDeviceAccess.Watch"/> marks
 /// the entry dirty and wakes the loop) is written to the remote as soon as
-/// a connection is available; a change made while the remote is unreachable
-/// stays dirty and is delivered on the next successful connect. Changes the
+/// the link is available; a change made while the remote is unreachable
+/// stays dirty and is delivered on the next successful exchange. Changes the
 /// poller itself makes while applying a poll never trigger a push, so the
 /// same cells may be polled and pushed (bidirectional mirror) without an echo
 /// loop. A communication error keeps the entry dirty (retried next tick);
@@ -33,10 +31,9 @@ public readonly record struct PushEntry(int Fc, TableKind LocalTable, int LocalO
 /// </summary>
 public sealed class ModbusClientPoller : IProtocolRunner
 {
-    private readonly IPEndPoint _remote;
+    private readonly IMasterLink _link;
     private readonly byte _remoteUnit;
     private readonly int _intervalMs;
-    private readonly int _timeoutMs;
     private readonly Device _local;
     private readonly PollEntry[] _polls;
     private readonly PushEntry[] _pushes;
@@ -44,18 +41,15 @@ public sealed class ModbusClientPoller : IProtocolRunner
     private readonly SemaphoreSlim _wake = new(0, 1);     // released by a local change to cut the interval wait short
     private readonly ILogger _logger;
 
-    private TcpClient? _client;
-    private ushort _transactionId;
     private int _selfWriteThread = -1;                    // thread applying a poll to the local device (its Watch callbacks are ours)
 
-    public ModbusClientPoller(string name, IPEndPoint remote, byte remoteUnit,
-        int intervalMs, int timeoutMs, Device local, PollEntry[] polls, ILogger logger, PushEntry[]? pushes = null)
+    public ModbusClientPoller(string name, IMasterLink link, byte remoteUnit, int intervalMs,
+        Device local, PollEntry[] polls, ILogger logger, PushEntry[]? pushes = null)
     {
         Name = name;
-        _remote = remote;
+        _link = link;
         _remoteUnit = remoteUnit;
         _intervalMs = intervalMs;
-        _timeoutMs = timeoutMs;
         _local = local;
         _polls = polls;
         _pushes = pushes ?? [];
@@ -65,8 +59,8 @@ public sealed class ModbusClientPoller : IProtocolRunner
 
     public string Name { get; }
 
-    /// <summary>True while connected (observability for tests/future GUI).</summary>
-    public bool IsConnected => _client is { Connected: true };
+    /// <summary>The remote is reachable (see <see cref="IMasterLink.IsConnected"/>); feeds plc.getVariableStatus.</summary>
+    public bool IsConnected => _link.IsConnected;
 
     /// <summary>True while at least one push entry has an undelivered local change.</summary>
     public bool HasPendingPush
@@ -119,7 +113,7 @@ public sealed class ModbusClientPoller : IProtocolRunner
             {
                 w.Dispose();
             }
-            Close();
+            _link.Close();
         }
     }
 
@@ -144,13 +138,12 @@ public sealed class ModbusClientPoller : IProtocolRunner
         }
     }
 
-    /// <summary>One cycle: (re)connect lazily, deliver dirty pushes, then (when due) run all polls.</summary>
+    /// <summary>One cycle: open the link lazily, deliver dirty pushes, then (when due) run all polls.</summary>
     private async Task RunCycleAsync(bool pollDue, CancellationToken ct)
     {
-        var stream = await ConnectAsync(ct);
-        if (stream is null)
+        if (!await OpenLinkAsync(ct))
         {
-            return; // connect failure already logged
+            return; // failure already logged
         }
         for (int i = 0; i < _pushes.Length; i++)
         {
@@ -161,7 +154,7 @@ public sealed class ModbusClientPoller : IProtocolRunner
             Volatile.Write(ref _dirty[i], 0); // cleared before reading the local values: a later change re-dirties
             try
             {
-                await PushAsync(stream, _pushes[i], ct);
+                await PushAsync(_pushes[i], ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -170,8 +163,8 @@ public sealed class ModbusClientPoller : IProtocolRunner
             catch (Exception ex)
             {
                 Volatile.Write(ref _dirty[i], 1); // undelivered: retry next tick
-                _logger.ConnError(Name, _remote.ToString(), ex.Message);
-                Close();
+                _logger.ConnError(Name, _link.Remote, ex.Message);
+                await _link.ResetAsync(ct);
                 return;
             }
         }
@@ -183,7 +176,7 @@ public sealed class ModbusClientPoller : IProtocolRunner
         {
             try
             {
-                await MirrorPollAsync(stream, poll, ct);
+                await MirrorPollAsync(poll, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -191,23 +184,39 @@ public sealed class ModbusClientPoller : IProtocolRunner
             }
             catch (Exception ex)
             {
-                // any bad response poisons the pipelining state: drop the connection, retry next tick
-                _logger.ConnError(Name, _remote.ToString(), ex.Message);
-                Close();
+                // any bad response poisons the exchange state: reset the link, retry next tick
+                _logger.ConnError(Name, _link.Remote, ex.Message);
+                await _link.ResetAsync(ct);
                 return;
             }
         }
     }
 
+    /// <summary>Lazy link establishment; a failure is logged once per cycle.</summary>
+    private async Task<bool> OpenLinkAsync(CancellationToken ct)
+    {
+        if (_link.IsOpen)
+        {
+            return true;
+        }
+        try
+        {
+            await _link.ConnectAsync(ct);
+            _logger.ConnAccepted(Name, _link.Remote);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.ConnError(Name, _link.Remote, ex.Message);
+            return false;
+        }
+    }
+
     /// <summary>Read one poll entry from the remote and write it into the local device.</summary>
-    internal async Task MirrorPollAsync(NetworkStream stream, PollEntry poll, CancellationToken ct)
+    private async Task MirrorPollAsync(PollEntry poll, CancellationToken ct)
     {
         var req = ModbusClient.BuildReadRequest(poll.Fc, poll.RemoteOffset, poll.Count);
-        var pdu = await ExchangeAsync(stream, req, ct);
-        if (pdu is null)
-        {
-            return;
-        }
+        var pdu = await _link.ExchangeAsync(_remoteUnit, req, ct);
         if (!IsException(pdu))
         {
             ApplyToLocal(poll.Fc, poll.Count, pdu, poll.LocalTable, poll.LocalOffset);
@@ -218,7 +227,7 @@ public sealed class ModbusClientPoller : IProtocolRunner
     }
 
     /// <summary>Write one push entry's current local cells to the remote.</summary>
-    internal async Task PushAsync(NetworkStream stream, PushEntry push, CancellationToken ct)
+    private async Task PushAsync(PushEntry push, CancellationToken ct)
     {
         byte[] req;
         if (push.Fc is 5 or 15)
@@ -233,11 +242,7 @@ public sealed class ModbusClientPoller : IProtocolRunner
             _local.Read(push.LocalTable, push.LocalOffset, words);
             req = ModbusClient.BuildWriteRequest(push.Fc, push.RemoteOffset, words);
         }
-        var pdu = await ExchangeAsync(stream, req, ct);
-        if (pdu is null)
-        {
-            return;
-        }
+        var pdu = await _link.ExchangeAsync(_remoteUnit, req, ct);
         if (!IsException(pdu))
         {
             ModbusClient.CheckWriteResponse(push.Fc, push.RemoteOffset, push.Count, pdu);
@@ -245,52 +250,6 @@ public sealed class ModbusClientPoller : IProtocolRunner
         _logger.Request(Name, _remoteUnit, (byte)push.Fc,
             RequestInfo.AddressOf(req), RequestInfo.QuantityOf(req),
             IsException(pdu) ? ExceptionCodeOf(pdu) : null);
-    }
-
-    /// <summary>
-    /// One MBAP request/response on the persistent connection. Returns the
-    /// response PDU, or null when the unit id does not match (logged, nothing
-    /// to apply). Throws IOException on timeout, malformed header or a
-    /// transaction id mismatch.
-    /// </summary>
-    private async Task<byte[]?> ExchangeAsync(NetworkStream stream, byte[] req, CancellationToken ct)
-    {
-        var tid = ++_transactionId;
-        var frame = new byte[Mbap.HeaderSize + req.Length];
-        Mbap.WriteHeader(frame, tid, _remoteUnit, req.Length);
-        req.CopyTo(frame.AsSpan(Mbap.HeaderSize));
-
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(_timeoutMs);
-        var token = timeoutCts.Token;
-
-        try
-        {
-            await stream.WriteAsync(frame, token);
-
-            var header = new byte[Mbap.HeaderSize];
-            await stream.ReadExactlyAsync(header, token);
-            if (!Mbap.TryParseHeader(header, out var mbap))
-            {
-                throw new IOException("remote sent a malformed MBAP header");
-            }
-            if (mbap.TransactionId != tid)
-            {
-                throw new IOException($"response transaction id {mbap.TransactionId} ≠ request {tid}");
-            }
-            var pdu = new byte[mbap.Length - 1]; // TryParseHeader bounds the length
-            await stream.ReadExactlyAsync(pdu, token);
-            if (mbap.UnitId != _remoteUnit)
-            {
-                _logger.MalformedFrame(Name, _remote.ToString(), $"response unit id {mbap.UnitId} ≠ {_remoteUnit}");
-                return null; // no answer to apply, stay on the connection
-            }
-            return pdu;
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            throw new IOException($"request timed out after {_timeoutMs}ms");
-        }
     }
 
     /// <summary>
@@ -325,36 +284,4 @@ public sealed class ModbusClientPoller : IProtocolRunner
 
     private static byte ExceptionCodeOf(ReadOnlySpan<byte> pdu) =>
         pdu.Length >= 2 ? pdu[1] : (byte)0;
-
-    // --- connection -----------------------------------------------------------
-
-    /// <summary>Lazy persistent connection; a failed connect is logged once per cycle.</summary>
-    private async Task<NetworkStream?> ConnectAsync(CancellationToken ct)
-    {
-        if (IsConnected)
-        {
-            return _client!.GetStream();
-        }
-        try
-        {
-            var client = new TcpClient();
-            await client.ConnectAsync(_remote.Address, _remote.Port, ct);
-            client.ReceiveTimeout = _timeoutMs;
-            client.SendTimeout = _timeoutMs;
-            _client = client;
-            _logger.ConnAccepted(Name, _remote.ToString());
-            return client.GetStream();
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.ConnError(Name, _remote.ToString(), ex.Message);
-            return null;
-        }
-    }
-
-    private void Close()
-    {
-        _client?.Dispose();
-        _client = null;
-    }
 }

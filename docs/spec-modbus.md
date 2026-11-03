@@ -1,4 +1,4 @@
-# Modbus 実装仕様 (フェーズ 1: Modbus TCP / フェーズ 5: Modbus RTU / フェーズ 6: クライアント)
+# Modbus 実装仕様 (フェーズ 1: Modbus TCP / フェーズ 5: Modbus RTU / フェーズ 6・9・11: クライアント)
 
 この文書は `Moz.Core/Modbus/` のコーデック実装の仕様であり、`tests/Moz.Tests/ModbusPduTests.cs`（PDU）と `RtuTests.cs`（RTU 層）がこの表をエンコードしている。両者を同時に更新すること。
 
@@ -84,21 +84,30 @@ warn: moz.server.sim-a[0] conn=c1 remote=127.0.0.1:53124 err=bad MBAP header (pr
 
 **フレーム検出**（シリアルには境界がないので）:
 
-- 1 バイトずつ蓄積し、FC から導出した要求長 + CRC が成立した時点で応答する（FC01-06 は 8 バイト、FC0F/10 は 8 + byteCount）
+- 1 バイトずつ蓄積し、FC から導出した要求長 + CRC が成立した時点で応答する（FC01-06 は 8 バイト、FC0F/10 は 9 + byteCount = addr + PDU(6 + byteCount) + CRC）
 - **アイドル間隔（既定 50ms、`server.idle_gap_ms` で設定。9600bps での 3.5 文字 ≈ 4ms）でバッファを捨てる**。理由: CRC不一致・未知 FC・フレーム断片はすべて「成立しないフレーム」として捨てられ、次のフレーム待ちに戻る
 - **CRC 不一致 → 無応答**（仕様どおり。マスタはタイムアウトする）
 - unserved な slave address → 無応答（TCP の unit_ids と同じ規約）。設定した `unit_ids` に含まれないアドレスは答えない
 - サーバは生 `Stream` を受け取る。シリアルポートを開く（System.IO.Ports）のは CLI 側であり、コアは配管を知らない。テストはメモリ内 pipe で実施（仮想 COM 不要）
 - TCP と同一の PDU コーデック・例外コード・上限を使う。unit id は MBAP ではなく ADU から来る
 
-## Modbus TCP クライアント (マスタ) — フェーズ 6 / 9
+## Modbus クライアント (マスタ) — フェーズ 6 / 9 / 11
 
-`[[client]]` の動き。poll (FC01-04 の読み取りミラー、フェーズ 6) と push (FC05/06/15/16 の書き戻し、フェーズ 9) が 1 本の持続接続を共用する。
+`[[client]]` の動き。poll (FC01-04 の読み取りミラー、フェーズ 6) と push (FC05/06/15/16 の書き戻し、フェーズ 9) が 1 本のリンクを共用する。リンクは `IMasterLink` (`Modbus.Client`) で抽象化され、`TcpMasterLink` (MBAP + 持続 TCP 接続) と `RtuMasterLink` (シリアル様 Stream + CRC16、フェーズ 11) がある。ポーリング/push のループ (`ModbusClientPoller`) はトランスポートを知らない。
 
-- リクエスト構築: `ModbusClient.BuildReadRequest` (fc + addr2 + qty2)、`BuildWriteRequest` (FC05 `addr2 + FF00|0000`、FC06 `addr2 + value2`、FC15 `addr2 + qty2 + byteCount + bits (LSB 先頭)`、FC16 `addr2 + qty2 + byteCount + words (big-endian)`) — MBAP ヘッダ (トランザクション id は接続内で 1 順増加) + unit id を付けて送信
-- 応答解析: `ParseWordResponse` (FC03/04) / `ParseBitResponse` (FC01/02)、`CheckWriteResponse` (FC05/06 は要求のエコー、FC15/16 は `fc + addr2 + qty2`; アドレス・点数の不一致は不整合)。**例外応答 (fc|0x80 + code) は解析せず Request ログ 1 行 (`exc=`)**、poll ならローカルには何も書かず、push なら再送しない。応答の FC エコー・byteCount・tid 一致を検証し、不整合は接続ごと切って次 tick で張り直す
+- リクエスト構築: `ModbusClient.BuildReadRequest` (fc + addr2 + qty2)、`BuildWriteRequest` (FC05 `addr2 + FF00|0000`、FC06 `addr2 + value2`、FC15 `addr2 + qty2 + byteCount + bits (LSB 先頭)`、FC16 `addr2 + qty2 + byteCount + words (big-endian)`)。TCP は MBAP ヘッダ (トランザクション id は接続内で 1 順増加) + unit id を付けて送信、RTU は `[address] [PDU] [CRC16]` で送信
+- 応答解析: `ParseWordResponse` (FC03/04) / `ParseBitResponse` (FC01/02)、`CheckWriteResponse` (FC05/06 は要求のエコー、FC15/16 は `fc + addr2 + qty2`; アドレス・点数の不一致は不整合)。**例外応答 (fc|0x80 + code) は解析せず Request ログ 1 行 (`exc=`)**、poll ならローカルには何も書かず、push なら再送しない。応答の FC エコー・byteCount・(TCP) tid・unit id の一致を検証し、不整合は IOException としてリンクをリセット (TCP: 接続を切って次 tick で張り直す、RTU: 下記) する
 - ミラーは 1 poll = 1 回の device Write (1 つの DeviceChange) — 変数変更ログが自然に出る
 - push はローカル範囲の `Watch` 通知ごとに 1 要求 (範囲全体) を書く。起動時には何も送らず、リモートを読むこともない。通知があればポーリング周期を待たず即座に送るが、poll の周期は変わらない。poll が自分で書いたローカル変更は push の対象外 (同じセルの双方向ミラーでエコーしない)。未送達 (未接続・通信エラー) は次 tick に再送
 - poll のローカル書込みは `Device.Mirror` (プロセス内部の書込み) で行う: ローカルの discrete/input テーブルにも届き、変更通知も出る
 - 通信エラーの規約はスクリプト/サーバと同じ: ログして次 tick。プロセスは止まらない
 - テスト: moz 自身の TCP サーバを相手に実通信で検証（リモート停止→復旧の再接続、未接続中の変更が接続後に届くこと、push の未送達再送、poll 書込みがエコーしないことも含む）
+
+### RTU マスタ (`RtuMasterLink`) — フェーズ 11
+
+- 応答の受信: 先頭バイトを `timeout_ms` 待ち、以降のバイトは `idle_gap_ms` 以内に続くこと。応答の総長は FC から決まる (`Rtu.ResponseLength`: 例外応答 5 バイト、FC05/06/15/16 のエコー 8 バイト、FC01-04 は 5 + byteCount)。長さに達したら CRC とスレーブアドレスを検証する
+- エラーは全て IOException 1 種で、ループは WARN ログ 1 行 (`request timed out after Nms` / `incomplete response (n bytes)` / `malformed response` / `response CRC mismatch` / `response slave address X ≠ Y`) を出してリンクをリセットする。**リセットはポートを閉じない**: `idle_gap_ms` の無通信になるまで受信を捨て (遅れて届いた応答の除去)、次 tick で普通に送る。push の未送達は保持される
+- ポートは最初の周期で開く (`Func<Stream>`; CLI が `System.IO.Ports.SerialPort` を渡す)。開けなければ WARN ログして次 tick に再試行。シャットダウンで閉じる
+- `IsConnected` (= `plc.getVariableStatus` の `"connected"`) はポートが開いていて直前の要求に有効な応答があった状態。タイムアウト・フレーム誤りで false に戻り、次の成功で true
+- 要求を送る前の受信バッファ掃除はしない (毎要求 `idle_gap_ms` 待つコストを避ける)。遅延応答はアドレス/FC/長さ不一致として次の要求で検出され、リセットで捨てられる
+- テスト: メモリ pipe で moz 自身の RTU サーバと結合 (poll/push)、手製の応答器で無応答→復旧 (push の未送達が届く)、CRC 不一致・アドレス不一致・途中切れの 3 種が ConnError 1 行で次 poll は成功することを検証。この結合テストで RTU サーバ側の FC15/16 要求長の誤り (`8 + byteCount` → 正しくは `9 + byteCount`) が見つかり修正した

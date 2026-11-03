@@ -95,6 +95,32 @@ public class CliTests : IDisposable
     }
 
     [Fact]
+    public async Task Validate_RtuClient_Exits0()
+    {
+        const string toml =
+            """
+            [[device]]
+            name = "mirror"
+            holding = 100
+
+            [[client]]
+            name = "rtu-master"
+            protocol = "modbus-rtu"
+            device = "mirror"
+            serial_port = "COM11"
+            baud = 19200
+
+            [[client.poll]]
+            fc = 3
+            remote_offset = 0
+            count = 4
+            local_offset = 0
+            """;
+        var exit = await Moz.Cli.CliApp.Run(["validate", WriteFile("rtu-client.toml", toml)]);
+        Assert.Equal(0, exit);
+    }
+
+    [Fact]
     public async Task Validate_WithInitialValues_Exits0()
     {
         const string toml =

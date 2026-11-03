@@ -58,18 +58,48 @@ public static class Rtu
         return true;
     }
 
-    /// <summary>FC15/FC16: total = 6 (addr,fc,addr2,qty2,byteCount) + byteCount + 2 (CRC).</summary>
+    /// <summary>FC15/FC16: total = 7 (addr, fc, addr2, qty2, byteCount) + byteCount + 2 (CRC).</summary>
     private static int? FrameLengthForMultipleWrite(ReadOnlySpan<byte> frame)
     {
-        var byteCount = frame[5];
-        if (byteCount > ModbusLimits.PduMaxLength - 5)
+        var byteCount = frame[6];
+        if (byteCount > ModbusLimits.PduMaxLength - 6)
         {
             return null; // absurd byte count: never parseable
         }
-        return 8 + byteCount;
+        return 9 + byteCount;
     }
 
-    /// <summary>Check a response's trailing CRC (test helper).</summary>
+    /// <summary><see cref="ResponseLength"/>: more bytes are needed before the length is known.</summary>
+    public const int NeedMore = 0;
+
+    /// <summary><see cref="ResponseLength"/>: the FC can never frame (the master never sent it).</summary>
+    public const int Invalid = -1;
+
+    /// <summary>
+    /// Master side: the total ADU length of a response, derived from the
+    /// function code (and, for reads, the byte count) as the bytes arrive.
+    /// Exception responses are 5 bytes, write echoes 8, reads 5 + byteCount.
+    /// </summary>
+    public static int ResponseLength(ReadOnlySpan<byte> frame)
+    {
+        if (frame.Length < 2)
+        {
+            return NeedMore;
+        }
+        var fc = frame[1];
+        if ((fc & 0x80) != 0)
+        {
+            return (fc & 0x7F) is 0x01 or 0x02 or 0x03 or 0x04 or 0x05 or 0x06 or 0x0F or 0x10 ? 5 : Invalid;
+        }
+        return fc switch
+        {
+            0x01 or 0x02 or 0x03 or 0x04 => frame.Length < 3 ? NeedMore : 5 + frame[2],
+            0x05 or 0x06 or 0x0F or 0x10 => 8,
+            _ => Invalid,
+        };
+    }
+
+    /// <summary>Check a response's trailing CRC.</summary>
     public static bool CrcOk(ReadOnlySpan<byte> frame)
     {
         if (frame.Length < 4)

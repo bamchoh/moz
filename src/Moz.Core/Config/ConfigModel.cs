@@ -208,13 +208,37 @@ public sealed class ClientConfig
     [TomlPropertyName("name")]
     public string Name { get; set; } = "";
 
+    /// <summary>"modbus-tcp" (default) | "modbus-rtu" (validated by ConfigLoader).</summary>
+    [TomlPropertyName("protocol")]
+    public string Protocol { get; set; } = "modbus-tcp";
+
     /// <summary>The local device that receives the mirrored cells.</summary>
     [TomlPropertyName("device")]
     public string Device { get; set; } = "";
 
-    /// <summary>host:port of the remote slave.</summary>
+    /// <summary>host:port of the remote slave (REQUIRED for modbus-tcp, rejected otherwise).</summary>
     [TomlPropertyName("remote_addr")]
     public string RemoteAddr { get; set; } = "";
+
+    /// <summary>Serial port name (REQUIRED for modbus-rtu, rejected otherwise). Same keys as [[server]].</summary>
+    [TomlPropertyName("serial_port")]
+    public string? SerialPort { get; set; }
+
+    [TomlPropertyName("baud")]
+    public int Baud { get; set; } = 9600;
+
+    [TomlPropertyName("parity")]
+    public string Parity { get; set; } = "even";
+
+    [TomlPropertyName("data_bits")]
+    public int DataBits { get; set; } = 8;
+
+    [TomlPropertyName("stop_bits")]
+    public int StopBits { get; set; } = 1;
+
+    /// <summary>Idle gap (ms) that ends a response frame; also the time spent draining after an error. Default 50.</summary>
+    [TomlPropertyName("idle_gap_ms")]
+    public int IdleGapMs { get; set; } = 50;
 
     /// <summary>Unit id sent to the remote. Default 1.</summary>
     [TomlPropertyName("remote_unit")]

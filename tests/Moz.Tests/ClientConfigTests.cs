@@ -290,4 +290,70 @@ public class ClientConfigTests : IDisposable
         Assert.False(result.Ok);
         Assert.Contains(result.Errors, e => e.Message.Contains("poll local_offset 0 (+10 cells) exceeds device \"plc-mirror\" holding length 8"));
     }
+
+    // --- protocol = "modbus-rtu" (serial master) ----------------------------------------
+
+    private const string RtuBase =
+        """
+        [[device]]
+        name = "plc-mirror"
+
+        [[client]]
+        name = "r1"
+        protocol = "modbus-rtu"
+        device = "plc-mirror"
+        serial_port = "COM11"
+
+        [[client.poll]]
+        fc = 3
+        remote_offset = 0
+        count = 2
+        local_offset = 0
+        """;
+
+    [Fact]
+    public void Protocol_DefaultsToModbusTcp()
+    {
+        var result = Load("proto-default.toml", Base);
+        Assert.True(result.Ok, string.Join("\n", result.Errors));
+        Assert.Equal("modbus-tcp", result.Config!.Client[0].Protocol);
+    }
+
+    [Fact]
+    public void RtuClient_Loads_WithSerialDefaults()
+    {
+        var result = Load("rtu-ok.toml", RtuBase);
+        Assert.True(result.Ok, string.Join("\n", result.Errors));
+        var c = result.Config!.Client[0];
+        Assert.Equal("modbus-rtu", c.Protocol);
+        Assert.Equal("COM11", c.SerialPort);
+        Assert.Equal(9600, c.Baud);
+        Assert.Equal("even", c.Parity);
+        Assert.Equal(8, c.DataBits);
+        Assert.Equal(1, c.StopBits);
+        Assert.Equal(50, c.IdleGapMs);
+        Assert.Equal("", c.RemoteAddr);
+    }
+
+    [Theory]
+    [InlineData("rtu-noport", "serial_port = \"COM11\"", "", "client.serial_port is required")]
+    [InlineData("rtu-addr", "serial_port = \"COM11\"", "serial_port = \"COM11\"\nremote_addr = \"10.0.0.1:502\"", "client.remote_addr is only valid")]
+    [InlineData("rtu-baud", "serial_port = \"COM11\"", "serial_port = \"COM11\"\nbaud = 0", "client.baud value 0")]
+    [InlineData("rtu-parity", "serial_port = \"COM11\"", "serial_port = \"COM11\"\nparity = \"mark\"", "client.parity")]
+    [InlineData("rtu-gap", "serial_port = \"COM11\"", "serial_port = \"COM11\"\nidle_gap_ms = 0", "client.idle_gap_ms value 0")]
+    [InlineData("rtu-proto", "protocol = \"modbus-rtu\"", "protocol = \"modbus-ascii\"", "client.protocol")]
+    public void RtuClient_InvalidKeys_Fail(string file, string find, string replace, string why)
+    {
+        var result = Load(file + ".toml", RtuBase.Replace(find, replace));
+        Assert.False(result.Ok);
+        Assert.Contains(result.Errors, e => e.Message.Contains(why));
+    }
+
+    [Fact]
+    public void TcpClient_SerialPort_Fails()
+    {
+        var result = Load("tcp-serial.toml", Base.Replace("remote_unit = 1", "remote_unit = 1\nserial_port = \"COM11\""));
+        Assert.False(result.Ok);
+        Assert.Contains(result.Errors, e => e.Message.Contains("client.serial_port is only valid for serial protocols"));
+    }
 }

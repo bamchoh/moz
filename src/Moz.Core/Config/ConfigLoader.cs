@@ -88,6 +88,7 @@ public static partial class ConfigLoader
     private static readonly string[] LogLevels = ["trace", "debug", "info", "warn", "error"];
     private static readonly string[] LogFormats = ["text", "json"];
     private static readonly string[] Protocols = ["modbus-tcp", "modbus-rtu", "opcua"];
+    private static readonly string[] ClientProtocols = ["modbus-tcp", "modbus-rtu"];
 
     private static void Validate(MozConfig config, string path, List<ConfigError> errors)
     {
@@ -193,12 +194,8 @@ public static partial class ConfigLoader
                 errors.Add(new ConfigError(path,
                     $"server.endpoint is only valid for the opcua protocol, set on \"{server.Name}\" ({server.Protocol})"));
             }
-            CheckRange(server.Baud, "server.baud", 110, 4_000_000, path, errors);
-            CheckChoice(server.Parity, ["none", "even", "odd"], "server.parity", path, errors,
-                defaultIs: "even", context: $"[server \"{server.Name}\"]");
-            CheckRange(server.DataBits, "server.data_bits", 7, 8, path, errors);
-            CheckRange(server.StopBits, "server.stop_bits", 1, 2, path, errors);
-            CheckRange(server.IdleGapMs, "server.idle_gap_ms", 1, 1000, path, errors);
+            CheckSerial("server", server.Baud, server.Parity, server.DataBits, server.StopBits, server.IdleGapMs,
+                $"[server \"{server.Name}\"]", path, errors);
         }
 
         // duplicate names: devices and servers are separate namespaces,
@@ -229,17 +226,38 @@ public static partial class ConfigLoader
             var ctx = $"[[client]] \"{client.Name}\"";
             Require(client.Name, "client.name", path, errors, ctx);
             Require(client.Device, "client.device", path, errors, ctx);
-            Require(client.RemoteAddr, "client.remote_addr", path, errors, ctx);
             CheckExtra(client.Extra, ctx, path, errors);
+            CheckChoice(client.Protocol, ClientProtocols, "client.protocol", path, errors,
+                defaultIs: "modbus-tcp", context: ctx);
             CheckRange(client.RemoteUnit, "client.remote_unit", 0, Modbus.ModbusLimits.UnitIdMax, path, errors);
             CheckRange(client.IntervalMs, "client.interval_ms", 100, 3_600_000, path, errors);
             CheckRange(client.TimeoutMs, "client.timeout_ms", 10, 600_000, path, errors);
 
-            if (client.RemoteAddr.Length > 0 && !TryParseRemoteAddr(client.RemoteAddr))
+            // transport keys: exactly the set the protocol needs
+            if (client.Protocol == "modbus-rtu")
             {
-                errors.Add(new ConfigError(path,
-                    $"client.remote_addr value \"{client.RemoteAddr}\" is invalid (host:port, port 1..65535) in {ctx}"));
+                Require(client.SerialPort ?? "", "client.serial_port", path, errors, $"{ctx} (required for modbus-rtu)");
+                if (client.RemoteAddr.Length > 0)
+                {
+                    errors.Add(new ConfigError(path,
+                        $"client.remote_addr is only valid for modbus-tcp, set in {ctx} ({client.Protocol})"));
+                }
             }
+            else
+            {
+                Require(client.RemoteAddr, "client.remote_addr", path, errors, ctx);
+                if (client.RemoteAddr.Length > 0 && !TryParseRemoteAddr(client.RemoteAddr))
+                {
+                    errors.Add(new ConfigError(path,
+                        $"client.remote_addr value \"{client.RemoteAddr}\" is invalid (host:port, port 1..65535) in {ctx}"));
+                }
+                if (client.SerialPort is not null)
+                {
+                    errors.Add(new ConfigError(path,
+                        $"client.serial_port is only valid for serial protocols (modbus-rtu), set in {ctx} ({client.Protocol})"));
+                }
+            }
+            CheckSerial("client", client.Baud, client.Parity, client.DataBits, client.StopBits, client.IdleGapMs, ctx, path, errors);
 
             devices.TryGetValue(client.Device, out var device);
             foreach (var poll in client.Poll)
@@ -385,6 +403,17 @@ public static partial class ConfigLoader
             return false;
         }
         return !string.IsNullOrWhiteSpace(uri.Host);
+    }
+
+    /// <summary>Serial line settings, shared by [[server]] (slave) and [[client]] (master).</summary>
+    private static void CheckSerial(string key, int baud, string parity, int dataBits, int stopBits, int idleGapMs,
+        string ctx, string path, List<ConfigError> errors)
+    {
+        CheckRange(baud, $"{key}.baud", 110, 4_000_000, path, errors);
+        CheckChoice(parity, ["none", "even", "odd"], $"{key}.parity", path, errors, defaultIs: "even", context: ctx);
+        CheckRange(dataBits, $"{key}.data_bits", 7, 8, path, errors);
+        CheckRange(stopBits, $"{key}.stop_bits", 1, 2, path, errors);
+        CheckRange(idleGapMs, $"{key}.idle_gap_ms", 1, 1000, path, errors);
     }
 
     private static bool TryParseRemoteAddr(string addr)

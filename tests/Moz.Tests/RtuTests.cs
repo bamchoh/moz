@@ -88,6 +88,25 @@ public class RtuTests
     }
 
     [Fact]
+    public void TryParseFrame_MultipleWriteRequest_FC16_And_FC15()
+    {
+        // FC16: addr(1) fc(1) start(2) qty(2) byteCount(1) data(byteCount) crc(2) = 9 + byteCount
+        var pdu16 = Hex("10001400020411112222");
+        var frame = Rtu.Frame(0x01, pdu16);
+        Assert.Equal(13, frame.Length);
+        Assert.True(Rtu.TryParseFrame(frame, out var addr, out var parsed));
+        Assert.Equal(0x01, addr);
+        Assert.Equal(ToHex(pdu16), ToHex(parsed));
+        Assert.False(Rtu.TryParseFrame(frame.AsSpan(0, frame.Length - 1), out _, out _)); // one byte short
+
+        // FC15: 10 coils = 2 data bytes (spec example 0F 0013 000A 02 CD01)
+        var pdu15 = Hex("0F0013000A02CD01");
+        Assert.True(Rtu.TryParseFrame(Rtu.Frame(0x11, pdu15), out addr, out parsed));
+        Assert.Equal(0x11, addr);
+        Assert.Equal(ToHex(pdu15), ToHex(parsed));
+    }
+
+    [Fact]
     public void TryParseFrame_BadCrc_Rejected()
     {
         Assert.False(Rtu.TryParseFrame(Hex("1103006B00037686"), out _, out _)); // last byte flipped
@@ -114,6 +133,28 @@ public class RtuTests
     {
         // unknown FCs keep accumulating (only the idle gap ends such frames)
         Assert.False(Rtu.TryParseFrame(Hex("11090000018776"), out _, out _));
+    }
+
+    // --- response framing (master side) ------------------------------------------------
+
+    [Theory]
+    [InlineData("", Rtu.NeedMore)]
+    [InlineData("11", Rtu.NeedMore)]
+    [InlineData("1103", Rtu.NeedMore)]          // read: byte count not seen yet
+    [InlineData("110306", 11)]                  // FC03, 6 data bytes: 1+1+1+6+2
+    [InlineData("0101", Rtu.NeedMore)]
+    [InlineData("010101", 6)]                   // FC01, 1 data byte
+    [InlineData("0105", 8)]                     // write echoes are fixed-length
+    [InlineData("0106", 8)]
+    [InlineData("010F", 8)]
+    [InlineData("0110", 8)]
+    [InlineData("0183", 5)]                     // exception: addr + fc|80 + code + crc
+    [InlineData("0190", 5)]
+    [InlineData("0107", Rtu.Invalid)]           // FC the master never sends
+    [InlineData("0100", Rtu.Invalid)]
+    public void ResponseLength_FromFcAndByteCount(string hex, int expected)
+    {
+        Assert.Equal(expected, Rtu.ResponseLength(Hex(hex)));
     }
 
     // --- duplex round trip (no serial, no virtual COM) ----------------------------

@@ -146,7 +146,7 @@ idle_gap_ms = 50        # RTU フレームのアイドル区切り (省略: 50; 
 
 ## [[client]] — クライアント (マスタ): リモートスレーブのミラー
 
-moz が Modbus TCP マスタとして動作し、リモートスレーブを周期ポーリングして答えをローカル device にコピーし (`[[client.poll]]`、リモート → ローカル)、ローカル device の変更をリモートへ書き戻す (`[[client.push]]`、ローカル → リモート)。1 つの `[[client]]` は 1 本の持続 TCP 接続を poll と push で共用する。
+moz が Modbus マスタ (TCP または RTU) として動作し、リモートスレーブを周期ポーリングして答えをローカル device にコピーし (`[[client.poll]]`、リモート → ローカル)、ローカル device の変更をリモートへ書き戻す (`[[client.push]]`、ローカル → リモート)。1 つの `[[client]]` は 1 本のリンク (TCP 接続またはシリアルポート) を poll と push で共用する。
 
 ```toml
 [[device]]
@@ -154,9 +154,10 @@ name = "plc-mirror"
 
 [[client]]
 name        = "poll-plc1"
+protocol    = "modbus-tcp"          # "modbus-tcp" (省略時) | "modbus-rtu" (下記)
 device      = "plc-mirror"          # 鏡像の置き先 (必須、未宣言名はエラー)
-remote_addr = "192.168.0.10:502"    # host:port (必須; hostname も可)
-remote_unit = 1                   # 送信する Unit ID (省略: 1, 0..247)
+remote_addr = "192.168.0.10:502"    # host:port (modbus-tcp では必須; hostname も可)
+remote_unit = 1                   # 送信する Unit ID / スレーブアドレス (省略: 1, 0..247)
 interval_ms = 1000                # ポーリング周期 (省略: 1000, 100..3600000)
 timeout_ms  = 5000                # 1 要求あたりのタイムアウト (省略: 5000, 10..600000)
 
@@ -174,6 +175,28 @@ local_offset  = 20      # ローカル device の開始アドレス (この範�
 count         = 2       # 点数 (fc5/6: 1 固定、fc15: 1..1968、fc16: 1..123)
 remote_offset = 20      # リモートの開始アドレス
 ```
+
+### シリアル (modbus-rtu) マスタ
+
+```toml
+[[client]]
+name        = "rtu-master"
+protocol    = "modbus-rtu"
+device      = "plc-mirror"
+serial_port = "COM11"     # 必須 (modbus-rtu のとき)。"/dev/ttyUSB0" 等も可
+baud        = 9600        # 以下 [[server]] のシリアルキーと同じ (省略値も同じ: 9600 / even / 8 / 1 / 50)
+parity      = "even"
+data_bits   = 8
+stop_bits   = 1
+idle_gap_ms = 50          # 応答フレームの終端とみなす無通信時間、エラー後に捨て読みする時間
+remote_unit = 1
+timeout_ms  = 1000        # 応答の先頭バイトを待つ時間 (スレーブ無応答の判定)
+```
+
+- `serial_port` は modbus-rtu では必須、modbus-tcp では設定禁止。`remote_addr` はその逆 (modbus-rtu で書くとエラー)
+- ポートは起動時ではなく最初の周期で開き、開けなければ WARN ログして次の周期に再試行する (TCP の接続と同じ扱い)。開いたポートは無応答やフレーム誤りでは閉じず、エラー後は `idle_gap_ms` だけ受信を捨ててから次の要求を送る
+- `plc.getVariableStatus` の `"connected"` は RTU では「ポートが開いていて直前の要求にスレーブが応答した」の意味 (タイムアウトで `"disconnected"` に戻る)。詳細は docs/spec-modbus.md の RTU マスタ節
+- 同じシリアルポートを `[[server]]` と `[[client]]` の両方で開くことはできない (OS がエラーにする)
 
 poll (リモート → ローカル):
 
@@ -222,6 +245,10 @@ interval_ms = 500       # 100..3600000 (省略: 1000)
 | variable.value | 型の値域内、配列は count 要素ちょうど、string は length バイト以内 |
 | struct.field.count | 1 .. |
 | struct.field.length | 1 .. 250 (string のみ、必須) |
+| client.protocol | modbus-tcp / modbus-rtu (他はエラー; 省略: modbus-tcp) |
+| client.remote_addr | modbus-tcp で必須、modbus-rtu では禁止 |
+| client.serial_port | modbus-rtu で必須、modbus-tcp では禁止 |
+| client.baud / parity / data_bits / stop_bits / idle_gap_ms | server の同名キーと同じ範囲 |
 | client.remote_unit | 0 .. 247 |
 | client.interval_ms | 100 .. 3600000 |
 | client.timeout_ms | 10 .. 600000 |

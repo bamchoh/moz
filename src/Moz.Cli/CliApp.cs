@@ -144,18 +144,28 @@ public static class CliApp
 
         var runners = new List<IProtocolRunner>();
 
-        // client pollers (phase 6): moz as master mirrors remote slaves into local
-        // devices (poll) and writes local changes back (push). Each poll/push range
-        // is also recorded as a ClientLink so scripts can ask plc.getVariableStatus
+        // client pollers (phase 6/11): moz as master mirrors remote slaves into local
+        // devices (poll) and writes local changes back (push) over a TCP or RTU link.
+        // Each poll/push range is also recorded as a ClientLink so scripts can ask
+        // plc.getVariableStatus
         var links = new Dictionary<string, List<ClientLink>>();
         foreach (var c in config.Client)
         {
+            IMasterLink link = c.Protocol switch
+            {
+                "modbus-tcp" => new TcpMasterLink(ParseRemoteAddr(c.RemoteAddr), c.TimeoutMs),
+                // the port is opened lazily (first cycle) and re-opened after a failure, like a TCP connect
+                "modbus-rtu" => new RtuMasterLink(
+                    () => OpenSerialPort(c.SerialPort!, c.Baud, c.Parity, c.DataBits, c.StopBits),
+                    c.SerialPort!, c.TimeoutMs, c.IdleGapMs),
+                _ => throw new InvalidOperationException(
+                    $"unknown client protocol \"{c.Protocol}\" (already rejected by config validation)"),
+            };
             var poller = new ModbusClientPoller(
                 c.Name,
-                ParseRemoteAddr(c.RemoteAddr),
+                link,
                 (byte)c.RemoteUnit,
                 c.IntervalMs,
-                c.TimeoutMs,
                 devices[c.Device],
                 c.Poll.Select(p => new PollEntry(p.Fc, p.RemoteOffset, p.Count, p.EffectiveLocalTable(), p.LocalOffset)).ToArray(),
                 loggerFactory.CreateLogger($"moz.client.{c.Name}"),
@@ -202,7 +212,7 @@ public static class CliApp
                     loggerFactory.CreateLogger($"moz.server.{s.Name}")),
                 "modbus-rtu" => new RtuServer(
                     s.Name,
-                    OpenSerialPort(s),
+                    OpenSerialPort(s.SerialPort!, s.Baud, s.Parity, s.DataBits, s.StopBits),
                     device,
                     s.UnitIds is { Count: > 0 } ? s.UnitIds.Select(u => (ushort)u).ToArray() : null,
                     s.IdleGapMs,
@@ -257,12 +267,10 @@ public static class CliApp
         return new IPEndPoint(addresses.First(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork), port);
     }
 
-    /// <summary>Open the serial port backing an RTU runner; the Core layer only ever sees the stream.</summary>
-    private static Stream OpenSerialPort(ServerConfig s)
+    /// <summary>Open the serial port backing an RTU server or master; the Core layer only ever sees the stream.</summary>
+    private static Stream OpenSerialPort(string name, int baud, string parity, int dataBits, int stopBits)
     {
-        var port = new System.IO.Ports.SerialPort(
-            s.SerialPort!, s.Baud, ToParity(s.Parity), s.DataBits,
-            (System.IO.Ports.StopBits)s.StopBits)
+        var port = new System.IO.Ports.SerialPort(name, baud, ToParity(parity), dataBits, (System.IO.Ports.StopBits)stopBits)
         {
             ReadTimeout = System.Threading.Timeout.Infinite, // the RTU loop owns timing
             WriteTimeout = 1000,
