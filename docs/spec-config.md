@@ -146,7 +146,15 @@ idle_gap_ms = 50        # RTU フレームのアイドル区切り (省略: 50; 
 
 ## [[client]] — クライアント (マスタ): リモートスレーブのミラー
 
-moz が Modbus マスタ (TCP または RTU) として動作し、リモートスレーブを周期ポーリングして答えをローカル device にコピーし (`[[client.poll]]`、リモート → ローカル)、ローカル device の変更をリモートへ書き戻す (`[[client.push]]`、ローカル → リモート)。1 つの `[[client]]` は 1 本のリンク (TCP 接続またはシリアルポート) を poll と push で共用する。
+moz がマスタ (クライアント) として動作し、リモート機器を周期ポーリングして答えをローカル device にコピーし (`[[client.poll]]`、リモート → ローカル)、ローカル device の変更をリモートへ書き戻す (`[[client.push]]`、ローカル → リモート)。1 つの `[[client]]` は 1 本のリンク (TCP 接続またはシリアルポート) を poll と push で共用する。
+
+`protocol` でプロトコルを選ぶ。poll / push の動き (周期、未送達の保持、エコー抑止、エラー時の再試行) は全プロトコル共通で、**リモート側のアドレス指定だけがプロトコルごとに違う**: Modbus は `fc` + `remote_offset`、MC プロトコルは `remote = "D100"` のようなデバイス表記。無関係なプロトコルのキーを書くとエラーになる。
+
+| protocol | 相手 | 接続キー | poll / push のリモート指定 |
+|---|---|---|---|
+| `modbus-tcp` (省略時) | Modbus TCP スレーブ | `remote_addr`, `remote_unit` | `fc`, `remote_offset` |
+| `modbus-rtu` | Modbus RTU スレーブ (シリアル) | `serial_port` ほかシリアルキー, `remote_unit` | `fc`, `remote_offset` |
+| `mc-3e` | 三菱 MC プロトコル 3E フレーム (バイナリ, TCP) | `remote_addr`, `network`, `pc`, `module_io`, `module_station` | `remote` (デバイス表記) |
 
 ```toml
 [[device]]
@@ -154,27 +162,57 @@ name = "plc-mirror"
 
 [[client]]
 name        = "poll-plc1"
-protocol    = "modbus-tcp"          # "modbus-tcp" (省略時) | "modbus-rtu" (下記)
+protocol    = "modbus-tcp"          # "modbus-tcp" (省略時) | "modbus-rtu" | "mc-3e" (下記)
 device      = "plc-mirror"          # 鏡像の置き先 (必須、未宣言名はエラー)
 remote_addr = "192.168.0.10:502"    # host:port (modbus-tcp では必須; hostname も可)
-remote_unit = 1                   # 送信する Unit ID / スレーブアドレス (省略: 1, 0..247)
+remote_unit = 1                   # Modbus のみ: 送信する Unit ID / スレーブアドレス (省略: 1, 0..247)
 interval_ms = 1000                # ポーリング周期 (省略: 1000, 100..3600000)
 timeout_ms  = 5000                # 1 要求あたりのタイムアウト (省略: 5000, 10..600000)
 
 [[client.poll]]
-fc            = 3       # 読み取り FC: 1..4 (書き込み FC は対象外)
-remote_offset = 100     # リモートの開始アドレス
+fc            = 3       # Modbus のみ: 読み取り FC 1..4 (省略: 3)
+remote_offset = 100     # Modbus のみ: リモートの開始アドレス (省略: 0)
 count         = 10      # 読み取り点数 (ワード FC: 1..125, ビット FC: 1..2000)
 local_kind    = "holding"  # 省略可: fc から推測 (fc1→coil, fc2→discrete, fc3→holding, fc4→input)
 local_offset  = 0       # ローカル device の開始アドレス
 
 [[client.push]]
-fc            = 16      # 書き込み FC: 5 | 6 | 15 | 16 (省略: 16)
+fc            = 16      # Modbus のみ: 書き込み FC 5 | 6 | 15 | 16 (省略: 16)
 local_kind    = "holding"  # 省略可: fc から推測 (fc5/15→coil, fc6/16→holding)。discrete/input を読み取り元にしてもよい
 local_offset  = 20      # ローカル device の開始アドレス (この範囲を監視する)
 count         = 2       # 点数 (fc5/6: 1 固定、fc15: 1..1968、fc16: 1..123)
-remote_offset = 20      # リモートの開始アドレス
+remote_offset = 20      # Modbus のみ: リモートの開始アドレス (省略: 0)
 ```
+
+### MC プロトコル (mc-3e) マスタ
+
+```toml
+[[client]]
+name        = "mc-master"
+protocol    = "mc-3e"
+device      = "plc-mirror"
+remote_addr = "192.168.0.20:5000"  # 必須 (host:port)
+network     = 0         # 3E フレームのルーティング (省略: 0 / 255 / 1023 (0x03FF) / 0)
+pc          = 255
+module_io   = 1023
+module_station = 0
+interval_ms = 1000
+timeout_ms  = 1000      # 監視タイマにも使う (250ms 単位に丸め)
+
+[[client.poll]]
+remote       = "D100"   # デバイス表記: 英字コード + 先頭番号 (X/Y/B/W/SB/SW/DX/DY/ZR は 16 進)
+count        = 10       # 点数 (ワードデバイス 1..960、ビットデバイス 1..7168)
+local_kind   = "holding"   # 省略可: ビットデバイス→coil、ワードデバイス→holding。種別が合わないとエラー
+local_offset = 0
+
+[[client.push]]
+remote       = "M0"
+count        = 16
+local_offset = 0        # local_kind 省略時 coil
+```
+
+- `remote` は mc-3e では必須、Modbus では設定禁止。逆に `fc` / `remote_offset` / `remote_unit` は mc-3e では設定禁止。`network` 等のルーティングキーも mc-3e 以外では禁止
+- 終了コード ≠ 0 (デバイス範囲外など) はリモートの拒否として Request ログに `err=C056` の形で出る。poll は何も書かず、push は再送しない。詳細は docs/spec-mc.md
 
 ### シリアル (modbus-rtu) マスタ
 
@@ -245,11 +283,16 @@ interval_ms = 500       # 100..3600000 (省略: 1000)
 | variable.value | 型の値域内、配列は count 要素ちょうど、string は length バイト以内 |
 | struct.field.count | 1 .. |
 | struct.field.length | 1 .. 250 (string のみ、必須) |
-| client.protocol | modbus-tcp / modbus-rtu (他はエラー; 省略: modbus-tcp) |
-| client.remote_addr | modbus-tcp で必須、modbus-rtu では禁止 |
-| client.serial_port | modbus-rtu で必須、modbus-tcp では禁止 |
+| client.protocol | modbus-tcp / modbus-rtu / mc-3e (他はエラー; 省略: modbus-tcp) |
+| client.remote_addr | modbus-tcp / mc-3e で必須、modbus-rtu では禁止 |
+| client.serial_port | modbus-rtu で必須、他では禁止 |
 | client.baud / parity / data_bits / stop_bits / idle_gap_ms | server の同名キーと同じ範囲 |
-| client.remote_unit | 0 .. 247 |
+| client.remote_unit | 0 .. 247 (Modbus のみ; 他では禁止) |
+| client.network / pc / module_station | 0 .. 255 (mc-3e のみ; 他では禁止) |
+| client.module_io | 0 .. 65535 (mc-3e のみ; 他では禁止) |
+| client.poll[].remote / client.push[].remote | mc-3e で必須 (デバイス表記、番号は 24 ビット内、先頭 + count も 24 ビット内)、Modbus では禁止 |
+| client.poll[].fc / remote_offset, client.push[].fc / remote_offset | Modbus のみ; mc-3e では禁止 |
+| mc-3e の count | ワードデバイス 1 .. 960、ビットデバイス 1 .. 7168 |
 | client.interval_ms | 100 .. 3600000 |
 | client.timeout_ms | 10 .. 600000 |
 | client.poll[].fc | 1 .. 4 |

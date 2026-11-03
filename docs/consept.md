@@ -1,6 +1,6 @@
 # moz — 構想と設計
 
-moz は PLC の「通信」をシミュレートするツールであり、Modbus TCP/RTU サーバ（スレーブ側）・Modbus TCP/RTU クライアント（マスタ側ミラー）・OPC UA サーバ・周期スクリプトを 1 つの設定ファイルから同一プロセスで起動する CLI です。
+moz は PLC の「通信」をシミュレートするツールであり、Modbus TCP/RTU サーバ（スレーブ側）・Modbus TCP/RTU・MC プロトコル クライアント（マスタ側ミラー）・OPC UA サーバ・周期スクリプトを 1 つの設定ファイルから同一プロセスで起動する CLI です。
 
 karakuri（先代ツール）の反省を設計指針にしています:
 
@@ -32,14 +32,17 @@ karakuri（先代ツール）の反省を設計指針にしています:
 
 - **Devices 層**: シミュレート装置のメモリ空間。全プロトコル・OPC UA サーバ・将来の GUI が消費する唯一の表面が `IDeviceAccess`。型付き名前付き変数 (`VariableTable`) はこの上のフラットなオーバーレイ。構造体は設定読込時 (`VariableLayout`) にドット名の葉変数へ展開され、コア層は構造体を知らない
 - **コーデック層 (ModbusPdu)**: request PDU → メモリ操作 → response PDU を純関数で実装。ソケットがなくても単体テスト可能で、TCP/RTU/ASCII で共有される
-- **トランスポート層**: MBAP + TCP。RTU はこの層だけ置き換える（CRC16 + 3.5 文字アイドル + シリアル）。クライアント（マスタ）役も同じ切り方で、`IMasterLink` (TCP / RTU) の上にトランスポートを知らないポーリングループ (`ModbusClientPoller`) が乗る
+- **トランスポート層**: MBAP + TCP。RTU はこの層だけ置き換える（CRC16 + 3.5 文字アイドル + シリアル）
+- **クライアント層 (`Moz.Client`)**: プロトコル非依存の poll/push ループ `ClientPoller` と、プロトコルが実装する `IRemoteDevice` (項目ごとのローカル範囲 + ビット列/ワード列の読み書き)。Modbus は `ModbusRemote` (+ `IMasterLink` で TCP/RTU)、MC プロトコルは `McRemote`。新プロトコルのクライアントは `IRemoteDevice` 1 つ + 設定キー + CLI の switch 1 行で足せる
 
 ## 将来の拡張と seam
 
 | 拡張 | 入る場所 | 先行層への影響 |
 |---|---|---|
 | Modbus RTU (シリアル) | `Modbus.Rtu` 新 Runner (phase 5) | なし (codec 共有) |
-| クライアント (マスタ) | `Modbus` にリクエスト構築半分 + 新 Runner (phase 6) | なし |
+| クライアント (マスタ) | `Modbus` にリクエスト構築半分 + 新 Runner (phase 6) → phase 12 で `Moz.Client` に汎用化 | なし |
+| 新プロトコルのクライアント (MC, OPC UA クライアント, ...) | `IRemoteDevice` 実装 1 つ (phase 12 の `Moz.Mc` が例) + `[[client]]` のキー + `CliApp.BuildRemote` の case | なし (ループ・設定の骨格は共有) |
+| 新プロトコルのサーバ (MC サーバ, ...) | `IProtocolRunner` 実装 1 つ + `[[server]]` のキー + CLI の switch | なし (`IDeviceAccess` を消費) |
 | OPC UA | OPCFoundation.NetStandard を **in-process** で `IDeviceAccess` を消費 (phase 7)。変数をノード公開、変更通知は `Watch` を利用 | なし |
 | GUI (.NET) | `Moz.Cli` と並列の別プロジェクト。コア = `IDeviceAccess` + `Watch` + `ILoggerProvider` の追加で購読 | なし |
 | スクリプト | コアの上にRunner として追加 (phase 4) | なし |
@@ -70,3 +73,4 @@ karakuri（先代ツール）の反省を設計指針にしています:
 9. クライアントの書き戻し (`[[client.push]]`; ローカル device の `Watch` 通知でリモートへ FC5/6/15/16、poll と同じ接続、自分の poll 書込みはエコーしない、`plc.getVariableStatus` で連携状態を参照) ← **完了**
 10. 変数の初期値 (`[[variable]] value = ...`) と poll のローカル範囲検証 ← **完了**
 11. RTU マスタ (`[[client]] protocol = "modbus-rtu"`; マスタのトランスポートを `IMasterLink` に分離し TCP/RTU で共有、メモリ pipe で結合テスト) ← **完了**
+12. クライアントの汎用化 + MC プロトコル (`Moz.Client.ClientPoller` / `IRemoteDevice`; `[[client]] protocol = "mc-3e"` で 3E フレーム・バイナリ・TCP のマスタ、`remote = "D100"` 表記) ← **完了**

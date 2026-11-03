@@ -66,16 +66,43 @@ public static partial class ConfigLoader
         }
         foreach (var client in config.Client)
         {
-            foreach (var poll in client.Poll)
+            if (client.IsModbus)
             {
-                poll.LocalKind ??= PollConfig.DefaultLocalKind(poll.Fc);
+                client.RemoteUnit ??= 1;
+                foreach (var poll in client.Poll)
+                {
+                    poll.Fc ??= 3;
+                    poll.RemoteOffset ??= 0;
+                    poll.LocalKind ??= PollConfig.DefaultLocalKind(poll.Fc.Value);
+                }
+                foreach (var push in client.Push)
+                {
+                    push.Fc ??= 16;
+                    push.RemoteOffset ??= 0;
+                    push.LocalKind ??= PushConfig.DefaultLocalKind(push.Fc.Value);
+                }
             }
-            foreach (var push in client.Push)
+            else if (client.Protocol == "mc-3e")
             {
-                push.LocalKind ??= PushConfig.DefaultLocalKind(push.Fc);
+                client.Network ??= 0;
+                client.Pc ??= 0xFF;
+                client.ModuleIo ??= 0x03FF;
+                client.ModuleStation ??= 0;
+                foreach (var poll in client.Poll)
+                {
+                    poll.LocalKind ??= McDefaultLocalKind(poll.Remote);
+                }
+                foreach (var push in client.Push)
+                {
+                    push.LocalKind ??= McDefaultLocalKind(push.Remote);
+                }
             }
         }
     }
+
+    /// <summary>Bit devices mirror into coils, word devices into holding registers; null for an unparseable device (reported by Validate).</summary>
+    private static string? McDefaultLocalKind(string? remote) =>
+        remote is not null && Mc.McDevice.TryParse(remote, out var device, out _) ? (device.IsBit ? "coil" : "holding") : null;
 
     public static string DefaultConfigHint() =>
         "expected a [log] table, [[device]] tables, and [[server]] tables (see docs/spec-config.md)";
@@ -88,7 +115,7 @@ public static partial class ConfigLoader
     private static readonly string[] LogLevels = ["trace", "debug", "info", "warn", "error"];
     private static readonly string[] LogFormats = ["text", "json"];
     private static readonly string[] Protocols = ["modbus-tcp", "modbus-rtu", "opcua"];
-    private static readonly string[] ClientProtocols = ["modbus-tcp", "modbus-rtu"];
+    private static readonly string[] ClientProtocols = ["modbus-tcp", "modbus-rtu", "mc-3e"];
 
     private static void Validate(MozConfig config, string path, List<ConfigError> errors)
     {
@@ -229,9 +256,35 @@ public static partial class ConfigLoader
             CheckExtra(client.Extra, ctx, path, errors);
             CheckChoice(client.Protocol, ClientProtocols, "client.protocol", path, errors,
                 defaultIs: "modbus-tcp", context: ctx);
-            CheckRange(client.RemoteUnit, "client.remote_unit", 0, Modbus.ModbusLimits.UnitIdMax, path, errors);
             CheckRange(client.IntervalMs, "client.interval_ms", 100, 3_600_000, path, errors);
             CheckRange(client.TimeoutMs, "client.timeout_ms", 10, 600_000, path, errors);
+
+            // protocol-specific client keys
+            if (client.IsModbus)
+            {
+                CheckRange(client.RemoteUnit!.Value, "client.remote_unit", 0, Modbus.ModbusLimits.UnitIdMax, path, errors);
+            }
+            else if (client.RemoteUnit is not null)
+            {
+                errors.Add(new ConfigError(path, $"client.remote_unit is only valid for modbus clients, set in {ctx} ({client.Protocol})"));
+            }
+            if (client.Protocol == "mc-3e")
+            {
+                CheckRange(client.Network!.Value, "client.network", 0, 255, path, errors);
+                CheckRange(client.Pc!.Value, "client.pc", 0, 255, path, errors);
+                CheckRange(client.ModuleIo!.Value, "client.module_io", 0, 65535, path, errors);
+                CheckRange(client.ModuleStation!.Value, "client.module_station", 0, 255, path, errors);
+            }
+            else
+            {
+                foreach (var (value, key) in new[] { (client.Network, "network"), (client.Pc, "pc"), (client.ModuleIo, "module_io"), (client.ModuleStation, "module_station") })
+                {
+                    if (value is not null)
+                    {
+                        errors.Add(new ConfigError(path, $"client.{key} is only valid for mc-3e clients, set in {ctx} ({client.Protocol})"));
+                    }
+                }
+            }
 
             // transport keys: exactly the set the protocol needs
             if (client.Protocol == "modbus-rtu")
@@ -264,32 +317,21 @@ public static partial class ConfigLoader
             {
                 var pctx = $"[[client.poll]] on \"{client.Name}\"";
                 CheckExtra(poll.Extra, pctx, path, errors);
-                bool isBit = poll.Fc is 1 or 2;
-                if (poll.Fc is not (1 or 2 or 3 or 4))
-                {
-                    errors.Add(new ConfigError(path,
-                        $"poll.fc value {poll.Fc} is invalid (1..4, reads only) in {pctx}"));
-                }
-                else
-                {
-                    int max = isBit ? Modbus.ModbusLimits.ReadBitsMax : Modbus.ModbusLimits.ReadRegsMax;
-                    if (poll.Count < 1 || poll.Count > max)
-                    {
-                        errors.Add(new ConfigError(path,
-                            $"poll.count value {poll.Count} is out of range 1..{max} in {pctx}"));
-                    }
-                }
-                if (poll.RemoteOffset < 0 || poll.RemoteOffset > ushort.MaxValue)
-                {
-                    errors.Add(new ConfigError(path,
-                        $"poll.remote_offset value {poll.RemoteOffset} is out of range 0..65535 in {pctx}"));
-                }
                 if (poll.LocalOffset < 0 || poll.LocalOffset > ushort.MaxValue)
                 {
                     errors.Add(new ConfigError(path,
                         $"poll.local_offset value {poll.LocalOffset} is out of range 0..65535 in {pctx}"));
                 }
-                var table = CheckLocalKind(poll.LocalKind, poll.Fc, isBit, "poll", pctx, path, errors);
+                TableKind? table;
+                if (client.IsModbus)
+                {
+                    table = ValidateModbusPoll(poll, pctx, path, errors);
+                }
+                else
+                {
+                    CheckNotModbusKeys("poll", poll.Fc, poll.RemoteOffset, client.Protocol, pctx, path, errors);
+                    table = ValidateMcItem("poll", poll.Remote, poll.Count, poll.LocalKind, pctx, path, errors);
+                }
                 CheckLocalRange("poll", device, table, poll.LocalKind, poll.LocalOffset, poll.Count, pctx, path, errors);
             }
 
@@ -297,37 +339,21 @@ public static partial class ConfigLoader
             {
                 var pctx = $"[[client.push]] on \"{client.Name}\"";
                 CheckExtra(push.Extra, pctx, path, errors);
-                bool isBit = push.Fc is 5 or 15;
-                if (push.Fc is not (5 or 6 or 15 or 16))
-                {
-                    errors.Add(new ConfigError(path,
-                        $"push.fc value {push.Fc} is invalid (5|6|15|16, writes only) in {pctx}"));
-                }
-                else
-                {
-                    int max = push.Fc switch
-                    {
-                        5 or 6 => 1,
-                        15 => Modbus.ModbusLimits.WriteBitsMax,
-                        _ => Modbus.ModbusLimits.WriteRegsMax,
-                    };
-                    if (push.Count < 1 || push.Count > max)
-                    {
-                        errors.Add(new ConfigError(path,
-                            $"push.count value {push.Count} is out of range 1..{max} in {pctx}"));
-                    }
-                }
-                if (push.RemoteOffset < 0 || push.RemoteOffset > ushort.MaxValue)
-                {
-                    errors.Add(new ConfigError(path,
-                        $"push.remote_offset value {push.RemoteOffset} is out of range 0..65535 in {pctx}"));
-                }
                 if (push.LocalOffset < 0 || push.LocalOffset > ushort.MaxValue)
                 {
                     errors.Add(new ConfigError(path,
                         $"push.local_offset value {push.LocalOffset} is out of range 0..65535 in {pctx}"));
                 }
-                var table = CheckLocalKind(push.LocalKind, push.Fc, isBit, "push", pctx, path, errors);
+                TableKind? table;
+                if (client.IsModbus)
+                {
+                    table = ValidateModbusPush(push, pctx, path, errors);
+                }
+                else
+                {
+                    CheckNotModbusKeys("push", push.Fc, push.RemoteOffset, client.Protocol, pctx, path, errors);
+                    table = ValidateMcItem("push", push.Remote, push.Count, push.LocalKind, pctx, path, errors);
+                }
                 CheckLocalRange("push", device, table, push.LocalKind, push.LocalOffset, push.Count, pctx, path, errors);
             }
         }
@@ -403,6 +429,128 @@ public static partial class ConfigLoader
             return false;
         }
         return !string.IsNullOrWhiteSpace(uri.Host);
+    }
+
+    /// <summary>Modbus poll: fc 1..4, count within the read limit, remote_offset 0..65535, local_kind bitness = fc bitness.</summary>
+    private static TableKind? ValidateModbusPoll(PollConfig poll, string pctx, string path, List<ConfigError> errors)
+    {
+        if (poll.Remote is not null)
+        {
+            errors.Add(new ConfigError(path, $"poll.remote is only valid for mc-3e clients, set in {pctx}"));
+        }
+        int fc = poll.Fc!.Value;
+        bool isBit = fc is 1 or 2;
+        if (fc is not (1 or 2 or 3 or 4))
+        {
+            errors.Add(new ConfigError(path, $"poll.fc value {fc} is invalid (1..4, reads only) in {pctx}"));
+        }
+        else
+        {
+            int max = isBit ? Modbus.ModbusLimits.ReadBitsMax : Modbus.ModbusLimits.ReadRegsMax;
+            if (poll.Count < 1 || poll.Count > max)
+            {
+                errors.Add(new ConfigError(path, $"poll.count value {poll.Count} is out of range 1..{max} in {pctx}"));
+            }
+        }
+        if (poll.RemoteOffset is < 0 or > ushort.MaxValue)
+        {
+            errors.Add(new ConfigError(path, $"poll.remote_offset value {poll.RemoteOffset} is out of range 0..65535 in {pctx}"));
+        }
+        return CheckLocalKind(poll.LocalKind, fc, isBit, "poll", pctx, path, errors);
+    }
+
+    /// <summary>Modbus push: fc 5|6|15|16, count within the write limit (1 for fc 5/6), remote_offset 0..65535, local_kind bitness = fc bitness.</summary>
+    private static TableKind? ValidateModbusPush(PushConfig push, string pctx, string path, List<ConfigError> errors)
+    {
+        if (push.Remote is not null)
+        {
+            errors.Add(new ConfigError(path, $"push.remote is only valid for mc-3e clients, set in {pctx}"));
+        }
+        int fc = push.Fc!.Value;
+        bool isBit = fc is 5 or 15;
+        if (fc is not (5 or 6 or 15 or 16))
+        {
+            errors.Add(new ConfigError(path, $"push.fc value {fc} is invalid (5|6|15|16, writes only) in {pctx}"));
+        }
+        else
+        {
+            int max = fc switch
+            {
+                5 or 6 => 1,
+                15 => Modbus.ModbusLimits.WriteBitsMax,
+                _ => Modbus.ModbusLimits.WriteRegsMax,
+            };
+            if (push.Count < 1 || push.Count > max)
+            {
+                errors.Add(new ConfigError(path, $"push.count value {push.Count} is out of range 1..{max} in {pctx}"));
+            }
+        }
+        if (push.RemoteOffset is < 0 or > ushort.MaxValue)
+        {
+            errors.Add(new ConfigError(path, $"push.remote_offset value {push.RemoteOffset} is out of range 0..65535 in {pctx}"));
+        }
+        return CheckLocalKind(push.LocalKind, fc, isBit, "push", pctx, path, errors);
+    }
+
+    /// <summary>Modbus keys on a non-Modbus client are errors, not silently ignored.</summary>
+    private static void CheckNotModbusKeys(string key, int? fc, int? remoteOffset, string protocol, string ctx, string path, List<ConfigError> errors)
+    {
+        if (fc is not null)
+        {
+            errors.Add(new ConfigError(path, $"{key}.fc is only valid for modbus clients, set in {ctx} ({protocol})"));
+        }
+        if (remoteOffset is not null)
+        {
+            errors.Add(new ConfigError(path, $"{key}.remote_offset is only valid for modbus clients, set in {ctx} ({protocol})"));
+        }
+    }
+
+    /// <summary>
+    /// mc-3e poll/push: remote in MELSEC notation, count within the batch
+    /// limit of the device's bitness, head + count within 24 bits, local_kind
+    /// bitness = device bitness. Returns the local table when valid.
+    /// </summary>
+    private static TableKind? ValidateMcItem(string key, string? remote, int count, string? localKind,
+        string ctx, string path, List<ConfigError> errors)
+    {
+        Require(remote ?? "", $"{key}.remote", path, errors, $"{ctx} (device notation, e.g. D100, M0, X1A)");
+        if (string.IsNullOrWhiteSpace(remote))
+        {
+            return null;
+        }
+        if (!Mc.McDevice.TryParse(remote, out var device, out var address))
+        {
+            errors.Add(new ConfigError(path,
+                $"{key}.remote value \"{remote}\" is invalid (device code + number, e.g. D100, M0, X1A; number within 24 bits) in {ctx}"));
+            return null;
+        }
+        int max = device.IsBit ? Mc.Mc3E.ReadBitsMax : Mc.Mc3E.ReadWordsMax;
+        if (count < 1 || count > max)
+        {
+            errors.Add(new ConfigError(path, $"{key}.count value {count} is out of range 1..{max} in {ctx}"));
+        }
+        else if (address + count > Mc.McDevice.AddressMax + 1)
+        {
+            errors.Add(new ConfigError(path,
+                $"{key}.remote value \"{remote}\" + count {count} exceeds the 24-bit device address range in {ctx}"));
+        }
+        if (localKind is null)
+        {
+            return null;
+        }
+        if (!LocalKinds.TryParse(localKind, out var table))
+        {
+            errors.Add(new ConfigError(path, $"{key}.local_kind value \"{localKind}\" is invalid (coil|discrete|holding|input) in {ctx}"));
+            return null;
+        }
+        if (table.IsBit() != device.IsBit)
+        {
+            errors.Add(new ConfigError(path, device.IsBit
+                ? $"{key}.local_kind value \"{localKind}\" does not match the bit device {device.Code} (coil|discrete) in {ctx}"
+                : $"{key}.local_kind value \"{localKind}\" does not match the word device {device.Code} (holding|input) in {ctx}"));
+            return null;
+        }
+        return table;
     }
 
     /// <summary>Serial line settings, shared by [[server]] (slave) and [[client]] (master).</summary>

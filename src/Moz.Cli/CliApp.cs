@@ -2,9 +2,11 @@ using System.Net;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
 using Moz;
+using Moz.Client;
 using Moz.Config;
 using Moz.Devices;
 using Moz.Logging;
+using Moz.Mc;
 using Moz.Modbus.Client;
 using Moz.OpcUa;
 using Moz.Modbus.Rtu;
@@ -144,36 +146,18 @@ public static class CliApp
 
         var runners = new List<IProtocolRunner>();
 
-        // client pollers (phase 6/11): moz as master mirrors remote slaves into local
-        // devices (poll) and writes local changes back (push) over a TCP or RTU link.
-        // Each poll/push range is also recorded as a ClientLink so scripts can ask
-        // plc.getVariableStatus
+        // clients (phase 6/11/12): the generic poll/push loop (ClientPoller) over a
+        // protocol-specific IRemoteDevice. Each poll/push range is also recorded as
+        // a ClientLink so scripts can ask plc.getVariableStatus
         var links = new Dictionary<string, List<ClientLink>>();
         foreach (var c in config.Client)
         {
-            IMasterLink link = c.Protocol switch
-            {
-                "modbus-tcp" => new TcpMasterLink(ParseRemoteAddr(c.RemoteAddr), c.TimeoutMs),
-                // the port is opened lazily (first cycle) and re-opened after a failure, like a TCP connect
-                "modbus-rtu" => new RtuMasterLink(
-                    () => OpenSerialPort(c.SerialPort!, c.Baud, c.Parity, c.DataBits, c.StopBits),
-                    c.SerialPort!, c.TimeoutMs, c.IdleGapMs),
-                _ => throw new InvalidOperationException(
-                    $"unknown client protocol \"{c.Protocol}\" (already rejected by config validation)"),
-            };
-            var poller = new ModbusClientPoller(
-                c.Name,
-                link,
-                (byte)c.RemoteUnit,
-                c.IntervalMs,
-                devices[c.Device],
-                c.Poll.Select(p => new PollEntry(p.Fc, p.RemoteOffset, p.Count, p.EffectiveLocalTable(), p.LocalOffset)).ToArray(),
-                loggerFactory.CreateLogger($"moz.client.{c.Name}"),
-                c.Push.Select(p => new PushEntry(p.Fc, p.EffectiveLocalTable(), p.LocalOffset, p.Count, p.RemoteOffset)).ToArray());
+            var clientLogger = loggerFactory.CreateLogger($"moz.client.{c.Name}");
+            var poller = new ClientPoller(c.Name, BuildRemote(c, clientLogger), c.IntervalMs, devices[c.Device], clientLogger);
             runners.Add(poller);
             var deviceLinks = links.TryGetValue(c.Device, out var l) ? l : links[c.Device] = [];
-            deviceLinks.AddRange(c.Poll.Select(p => new ClientLink(p.EffectiveLocalTable(), p.LocalOffset, p.Count, () => poller.IsConnected)));
-            deviceLinks.AddRange(c.Push.Select(p => new ClientLink(p.EffectiveLocalTable(), p.LocalOffset, p.Count, () => poller.IsConnected)));
+            deviceLinks.AddRange(poller.Remote.Polls.Concat(poller.Remote.Pushes)
+                .Select(r => new ClientLink(r.Table, r.Offset, r.Count, () => poller.IsConnected)));
         }
 
         // periodic scripts (phase 4): paths resolve relative to the config file
@@ -250,6 +234,41 @@ public static class CliApp
         logger.LogInformation("all runners stopped");
         return 0;
     }
+
+    /// <summary>The ONE place a [[client]] protocol name becomes an IRemoteDevice.</summary>
+    private static IRemoteDevice BuildRemote(ClientConfig c, ILogger logger)
+    {
+        switch (c.Protocol)
+        {
+            case "modbus-tcp":
+            case "modbus-rtu":
+                IMasterLink link = c.Protocol == "modbus-tcp"
+                    ? new TcpMasterLink(ParseRemoteAddr(c.RemoteAddr), c.TimeoutMs)
+                    // the port is opened lazily (first cycle) and re-opened after a failure, like a TCP connect
+                    : new RtuMasterLink(
+                        () => OpenSerialPort(c.SerialPort!, c.Baud, c.Parity, c.DataBits, c.StopBits),
+                        c.SerialPort!, c.TimeoutMs, c.IdleGapMs);
+                return new ModbusRemote(c.Name, link, (byte)c.RemoteUnit!.Value,
+                    c.Poll.Select(p => new PollEntry(p.Fc!.Value, p.RemoteOffset!.Value, p.Count, p.EffectiveLocalTable(), p.LocalOffset)).ToArray(),
+                    c.Push.Select(p => new PushEntry(p.Fc!.Value, p.EffectiveLocalTable(), p.LocalOffset, p.Count, p.RemoteOffset!.Value)).ToArray(),
+                    logger);
+            case "mc-3e":
+                return new McRemote(c.Name, ParseRemoteAddr(c.RemoteAddr), c.TimeoutMs,
+                    new Mc3EOptions((byte)c.Network!.Value, (byte)c.Pc!.Value, (ushort)c.ModuleIo!.Value, (byte)c.ModuleStation!.Value,
+                        Mc3E.TimerUnitsFor(c.TimeoutMs)),
+                    c.Poll.Select(p => McEntryOf(p.Remote!, p.Count, p.EffectiveLocalTable(), p.LocalOffset)).ToArray(),
+                    c.Push.Select(p => McEntryOf(p.Remote!, p.Count, p.EffectiveLocalTable(), p.LocalOffset)).ToArray(),
+                    logger);
+            default:
+                throw new InvalidOperationException(
+                    $"unknown client protocol \"{c.Protocol}\" (already rejected by config validation)");
+        }
+    }
+
+    private static McEntry McEntryOf(string remote, int count, TableKind table, int localOffset) =>
+        McDevice.TryParse(remote, out var device, out var address)
+            ? new McEntry(device, address, count, table, localOffset)
+            : throw new InvalidOperationException($"invalid MC device \"{remote}\" (already rejected by config validation)");
 
     /// <summary>Resolve a validated host:port client remote into an endpoint.</summary>
     private static IPEndPoint ParseRemoteAddr(string addr)

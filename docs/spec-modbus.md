@@ -93,7 +93,15 @@ warn: moz.server.sim-a[0] conn=c1 remote=127.0.0.1:53124 err=bad MBAP header (pr
 
 ## Modbus クライアント (マスタ) — フェーズ 6 / 9 / 11
 
-`[[client]]` の動き。poll (FC01-04 の読み取りミラー、フェーズ 6) と push (FC05/06/15/16 の書き戻し、フェーズ 9) が 1 本のリンクを共用する。リンクは `IMasterLink` (`Modbus.Client`) で抽象化され、`TcpMasterLink` (MBAP + 持続 TCP 接続) と `RtuMasterLink` (シリアル様 Stream + CRC16、フェーズ 11) がある。ポーリング/push のループ (`ModbusClientPoller`) はトランスポートを知らない。
+`[[client]]` の動き。poll (FC01-04 の読み取りミラー、フェーズ 6) と push (FC05/06/15/16 の書き戻し、フェーズ 9) が 1 本のリンクを共用する。
+
+層構成 (フェーズ 12 で汎用化):
+
+- **`Moz.Client.ClientPoller`** (プロトコル非依存): 周期、ローカルの `Watch` → dirty フラグ、未送達の保持と再試行、poll 結果の `Device.Mirror` (自分の書込みのエコー抑止)、接続/エラーログ。相手は `IRemoteDevice` (poll/push 項目ごとの「ローカル範囲」と、ビット列/ワード列の読み書き、接続/リセット/クローズ)
+- **`Modbus.Client.ModbusRemote`** (`IRemoteDevice` 実装): poll 1 項目 = 読出し要求 1 つ、push 1 項目 = 書込み要求 1 つ。例外応答は拒否 (ログして poll は null、push は正常終了)、それ以外の不整合は IOException
+- **`IMasterLink`**: PDU をやり取りするトランスポート。`TcpMasterLink` (MBAP + 持続 TCP 接続) と `RtuMasterLink` (シリアル様 Stream + CRC16、フェーズ 11)
+
+新しいプロトコルのクライアントは `IRemoteDevice` を 1 つ実装し、設定キーと CLI の switch を 1 行足すだけでよい (MC プロトコルの例: docs/spec-mc.md)。
 
 - リクエスト構築: `ModbusClient.BuildReadRequest` (fc + addr2 + qty2)、`BuildWriteRequest` (FC05 `addr2 + FF00|0000`、FC06 `addr2 + value2`、FC15 `addr2 + qty2 + byteCount + bits (LSB 先頭)`、FC16 `addr2 + qty2 + byteCount + words (big-endian)`)。TCP は MBAP ヘッダ (トランザクション id は接続内で 1 順増加) + unit id を付けて送信、RTU は `[address] [PDU] [CRC16]` で送信
 - 応答解析: `ParseWordResponse` (FC03/04) / `ParseBitResponse` (FC01/02)、`CheckWriteResponse` (FC05/06 は要求のエコー、FC15/16 は `fc + addr2 + qty2`; アドレス・点数の不一致は不整合)。**例外応答 (fc|0x80 + code) は解析せず Request ログ 1 行 (`exc=`)**、poll ならローカルには何も書かず、push なら再送しない。応答の FC エコー・byteCount・(TCP) tid・unit id の一致を検証し、不整合は IOException としてリンクをリセット (TCP: 接続を切って次 tick で張り直す、RTU: 下記) する

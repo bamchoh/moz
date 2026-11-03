@@ -95,6 +95,36 @@ public class CliTests : IDisposable
     }
 
     [Fact]
+    public async Task Validate_McClient_Exits0()
+    {
+        const string toml =
+            """
+            [[device]]
+            name = "mirror"
+            coils = 100
+            holding = 100
+
+            [[client]]
+            name = "mc-master"
+            protocol = "mc-3e"
+            device = "mirror"
+            remote_addr = "192.168.0.20:5000"
+
+            [[client.poll]]
+            remote = "D100"
+            count = 4
+            local_offset = 0
+
+            [[client.push]]
+            remote = "M0"
+            count = 16
+            local_offset = 0
+            """;
+        var exit = await Moz.Cli.CliApp.Run(["validate", WriteFile("mc-client.toml", toml)]);
+        Assert.Equal(0, exit);
+    }
+
+    [Fact]
     public async Task Validate_RtuClient_Exits0()
     {
         const string toml =

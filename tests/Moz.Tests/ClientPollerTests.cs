@@ -1,6 +1,7 @@
 using System.Net;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moz.Devices;
+using Moz.Client;
 using Moz.Modbus.Client;
 
 namespace Moz.Tests;
@@ -19,8 +20,7 @@ public class ClientPollerTests
     {
         var remote = await TestServer.Start(); // default device: holding 0..1 = 0x1234, 0xABCD
         var local = new Device("local", holdingRegisters: 100);
-        var poller = new ModbusClientPoller("p", Tcp(remote.Port), remoteUnit: 1,
-            intervalMs: 50, local, Entries(StandardPolls), NullLogger.Instance);
+        var poller = Poller(Tcp(remote.Port), local, Entries(StandardPolls), NullLogger.Instance);
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
@@ -41,8 +41,7 @@ public class ClientPollerTests
         var local = new Device("local");
         // local_kind override: remote discrete (fc2) → local coil table
         var polls = new[] { new PollEntry(2, 0, 3, TableKind.Coil, 10) };
-        var poller = new ModbusClientPoller("p", Tcp(remote.Port, 2000), 1,
-            50, local, polls, NullLogger.Instance);
+        var poller = Poller(Tcp(remote.Port, 2000), local, polls, NullLogger.Instance);
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
@@ -61,8 +60,7 @@ public class ClientPollerTests
         var remote = await TestServer.Start(device: new Device("t", holdingRegisters: 10));
         var local = new Device("local", holdingRegisters: 100);
         var polls = new[] { new PollEntry(3, 100, 1, TableKind.HoldingRegister, 0) }; // beyond remote
-        var poller = new ModbusClientPoller("p", Tcp(remote.Port, 2000), 1,
-            50, local, polls, NullLogger.Instance);
+        var poller = Poller(Tcp(remote.Port, 2000), local, polls, NullLogger.Instance);
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
@@ -91,8 +89,7 @@ public class ClientPollerTests
         down.Stop(); // from here the port refuses connections
 
         var local = new Device("local", holdingRegisters: 100);
-        var poller = new ModbusClientPoller("p", Tcp(port, 500), 1,
-            50, local, Entries(StandardPolls), NullLogger.Instance);
+        var poller = Poller(Tcp(port, 500), local, Entries(StandardPolls), NullLogger.Instance);
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token); // failures logged, loop survives
@@ -122,8 +119,7 @@ public class ClientPollerTests
         };
         int notified = 0;
         using var watch = local.Watch(TableKind.InputRegister, 0, 1, _ => Interlocked.Increment(ref notified));
-        var poller = new ModbusClientPoller("p", Tcp(remote.Port, 2000), 1,
-            50, local, polls, NullLogger.Instance);
+        var poller = Poller(Tcp(remote.Port, 2000), local, polls, NullLogger.Instance);
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
@@ -157,8 +153,7 @@ public class ClientPollerTests
         var pushes = new[] { new PushEntry(16, TableKind.HoldingRegister, 10, 2, 50) };
         int remoteWrites = 0;
         using var watch = remote.Device.Watch(TableKind.HoldingRegister, 50, 2, _ => Interlocked.Increment(ref remoteWrites));
-        var poller = new ModbusClientPoller("p", Tcp(remote.Port, 2000), 1,
-            50, local, [], NullLogger.Instance, pushes);
+        var poller = Poller(Tcp(remote.Port, 2000), local, [], NullLogger.Instance, pushes);
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
@@ -194,8 +189,7 @@ public class ClientPollerTests
             new PushEntry(5, TableKind.Coil, 5, 1, 7),
             new PushEntry(6, TableKind.HoldingRegister, 7, 1, 9),
         };
-        var poller = new ModbusClientPoller("p", Tcp(remote.Port, 2000), 1,
-            50, local, [], NullLogger.Instance, pushes);
+        var poller = Poller(Tcp(remote.Port, 2000), local, [], NullLogger.Instance, pushes);
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
@@ -229,8 +223,7 @@ public class ClientPollerTests
         var pushes = new[] { new PushEntry(16, TableKind.HoldingRegister, 0, 2, 0) };
         int remoteWrites = 0;
         using var watch = remote.Device.Watch(TableKind.HoldingRegister, 0, 2, _ => Interlocked.Increment(ref remoteWrites));
-        var poller = new ModbusClientPoller("p", Tcp(remote.Port, 2000), 1,
-            50, local, polls, NullLogger.Instance, pushes);
+        var poller = Poller(Tcp(remote.Port, 2000), local, polls, NullLogger.Instance, pushes);
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
@@ -261,8 +254,7 @@ public class ClientPollerTests
 
         var local = new Device("local", holdingRegisters: 100);
         var pushes = new[] { new PushEntry(16, TableKind.HoldingRegister, 0, 1, 20) };
-        var poller = new ModbusClientPoller("p", Tcp(port, 500), 1,
-            50, local, [], NullLogger.Instance, pushes);
+        var poller = Poller(Tcp(port, 500), local, [], NullLogger.Instance, pushes);
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
@@ -288,8 +280,7 @@ public class ClientPollerTests
         var remote = await TestServer.Start();
         var local = new Device("local", holdingRegisters: 100);
         var pushes = new[] { new PushEntry(16, TableKind.HoldingRegister, 0, 1, 0) };
-        var poller = new ModbusClientPoller("p", Tcp(remote.Port, 300), 1,
-            50, local, [], NullLogger.Instance, pushes);
+        var poller = Poller(Tcp(remote.Port, 300), local, [], NullLogger.Instance, pushes);
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
@@ -321,8 +312,7 @@ public class ClientPollerTests
         var local = new Device("local", holdingRegisters: 100);
         var pushes = new[] { new PushEntry(16, TableKind.HoldingRegister, 0, 1, 100) }; // beyond remote
         var polls = new[] { new PollEntry(3, 0, 1, TableKind.HoldingRegister, 50) };
-        var poller = new ModbusClientPoller("p", Tcp(remote.Port, 2000), 1,
-            50, local, polls, provider.CreateLogger("p"), pushes);
+        var poller = Poller(Tcp(remote.Port, 2000), local, polls, provider.CreateLogger("p"), pushes);
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
@@ -341,6 +331,11 @@ public class ClientPollerTests
     }
 
     private static TcpMasterLink Tcp(int port, int timeoutMs = 2000) => new(new IPEndPoint(IPAddress.Loopback, port), timeoutMs);
+
+    /// <summary>The CLI's composition for a Modbus client: generic loop over a Modbus remote (unit 1, 50 ms interval).</summary>
+    private static ClientPoller Poller(IMasterLink link, Device local, PollEntry[] polls,
+        Microsoft.Extensions.Logging.ILogger logger, PushEntry[]? pushes = null) =>
+        new("p", new ModbusRemote("p", link, 1, polls, pushes ?? [], logger), 50, local, logger);
 
     private static PollEntry[] Entries(int[][] polls) =>
         polls.Select(p => new PollEntry(p[0], p[1], p[2], TableFor(p[0]), p[3])).ToArray();

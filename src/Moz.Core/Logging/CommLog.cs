@@ -29,6 +29,10 @@ public static class CommLog
         ushort addr, ushort qty, byte? exc) =>
         log.LogState(LogLevel.Debug, EventIds.Request, new RequestState(conn, unit, fc, addr, qty, exc));
 
+    /// <summary>One client request on a non-Modbus protocol: op (read/write), target ("D100"), points; error==null means success.</summary>
+    public static void Request(this ILogger log, string conn, string op, string target, int qty, string? error) =>
+        log.LogState(LogLevel.Debug, EventIds.Request, new RemoteRequestState(conn, op, target, qty, error));
+
     public static void ConnAccepted(this ILogger log, string conn, string remote) =>
         log.LogState(LogLevel.Information, EventIds.ConnAccepted, new ConnState(conn, remote));
 
@@ -97,6 +101,23 @@ public static class CommLog
         public override string ToString() => exc is null
             ? $"conn={conn} unit={unit} fc={fc:X2} addr={addr} qty={qty} result=ok"
             : $"conn={conn} unit={unit} fc={fc:X2} addr={addr} qty={qty} exc={exc}";
+        protected override KeyValuePair<string, object?>[] Items => _items;
+    }
+
+    private sealed class RemoteRequestState(string conn, string op, string target, int qty, string? error) : LogState
+    {
+        private readonly KeyValuePair<string, object?>[] _items =
+        [
+            new("conn", conn),
+            new("op", op),
+            new("target", target),
+            new("qty", qty),
+            error is null ? new("result", "ok") : new("err", error),
+        ];
+
+        public override string ToString() => error is null
+            ? $"conn={conn} op={op} target={target} qty={qty} result=ok"
+            : $"conn={conn} op={op} target={target} qty={qty} err={error}";
         protected override KeyValuePair<string, object?>[] Items => _items;
     }
 

@@ -118,6 +118,24 @@ local_offset = 20
 count = 2
 remote_offset = 20
 
+# MC protocol master (phase 12): same poll/push loop, MELSEC device notation.
+# Commented out because it needs a CPU (or an MC server) to talk to.
+# [[client]]
+# name = "mc-master"
+# protocol = "mc-3e"
+# device = "plc-mirror"
+# remote_addr = "192.168.0.20:5000"
+#
+# [[client.poll]]
+# remote = "D100"
+# count = 4
+# local_offset = 50
+#
+# [[client.push]]
+# remote = "M0"
+# count = 16
+# local_offset = 0
+
 # RTU master (phase 11): same poll/push keys, serial keys as on an RTU server.
 # Commented out because it needs a real serial port to open.
 # [[client]]

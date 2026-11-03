@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Moz.Devices;
 using Moz.Modbus;
+using Moz.Client;
 using Moz.Modbus.Client;
 using Moz.Modbus.Rtu;
 
@@ -25,7 +26,7 @@ public class ClientRtuTests
         await using var server = await RtuTestServer.Start(bus.SlaveStream, remote);
         var local = new Device("local", holdingRegisters: 100, discreteInputs: 100);
         PollEntry[] polls = [new(3, 0, 2, TableKind.HoldingRegister, 0), new(2, 0, 3, TableKind.DiscreteInput, 10)];
-        var poller = new ModbusClientPoller("p", Link(bus), 1, 50, local, polls, NullLogger.Instance);
+        var poller = new ClientPoller("p", new ModbusRemote("p", Link(bus), 1, polls, [], NullLogger.Instance), 50, local, NullLogger.Instance);
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
@@ -51,7 +52,7 @@ public class ClientRtuTests
         var local = new Device("local", coils: 100, holdingRegisters: 100);
         PushEntry[] pushes = [new(16, TableKind.HoldingRegister, 10, 2, 20), new(5, TableKind.Coil, 3, 1, 7)];
         var provider = new CapturingProvider();
-        var poller = new ModbusClientPoller("p", Link(bus), 1, 50, local, [], provider.CreateLogger("p"), pushes);
+        var poller = new ClientPoller("p", new ModbusRemote("p", Link(bus), 1, [], pushes, provider.CreateLogger("p")), 50, local, provider.CreateLogger("p"));
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
@@ -79,7 +80,7 @@ public class ClientRtuTests
         var provider = new CapturingProvider();
         PollEntry[] polls = [new(3, 0, 1, TableKind.HoldingRegister, 0)];
         PushEntry[] pushes = [new(6, TableKind.HoldingRegister, 5, 1, 5)];
-        var poller = new ModbusClientPoller("p", Link(bus, timeoutMs: 200), 1, 100, local, polls, provider.CreateLogger("p"), pushes);
+        var poller = new ClientPoller("p", new ModbusRemote("p", Link(bus, timeoutMs: 200), 1, polls, pushes, provider.CreateLogger("p")), 100, local, provider.CreateLogger("p"));
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
@@ -135,7 +136,7 @@ public class ClientRtuTests
         var local = new Device("local", holdingRegisters: 100);
         var provider = new CapturingProvider();
         PollEntry[] polls = [new(3, 0, 1, TableKind.HoldingRegister, 0)];
-        var poller = new ModbusClientPoller("p", Link(bus), 1, 100, local, polls, provider.CreateLogger("p"));
+        var poller = new ClientPoller("p", new ModbusRemote("p", Link(bus), 1, polls, [], provider.CreateLogger("p")), 100, local, provider.CreateLogger("p"));
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);

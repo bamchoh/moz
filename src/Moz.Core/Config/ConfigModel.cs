@@ -208,9 +208,12 @@ public sealed class ClientConfig
     [TomlPropertyName("name")]
     public string Name { get; set; } = "";
 
-    /// <summary>"modbus-tcp" (default) | "modbus-rtu" (validated by ConfigLoader).</summary>
+    /// <summary>"modbus-tcp" (default) | "modbus-rtu" | "mc-3e" (validated by ConfigLoader).</summary>
     [TomlPropertyName("protocol")]
     public string Protocol { get; set; } = "modbus-tcp";
+
+    /// <summary>The protocol is a Modbus flavour (fc / remote_offset / remote_unit keys).</summary>
+    public bool IsModbus => Protocol is "modbus-tcp" or "modbus-rtu";
 
     /// <summary>The local device that receives the mirrored cells.</summary>
     [TomlPropertyName("device")]
@@ -240,9 +243,22 @@ public sealed class ClientConfig
     [TomlPropertyName("idle_gap_ms")]
     public int IdleGapMs { get; set; } = 50;
 
-    /// <summary>Unit id sent to the remote. Default 1.</summary>
+    /// <summary>Modbus only: unit id sent to the remote. Default 1 (filled in Load); rejected on other protocols.</summary>
     [TomlPropertyName("remote_unit")]
-    public int RemoteUnit { get; set; } = 1;
+    public int? RemoteUnit { get; set; }
+
+    /// <summary>mc-3e only: 3E frame routing. Defaults (filled in Load): network 0, pc 255, module_io 0x03FF, module_station 0.</summary>
+    [TomlPropertyName("network")]
+    public int? Network { get; set; }
+
+    [TomlPropertyName("pc")]
+    public int? Pc { get; set; }
+
+    [TomlPropertyName("module_io")]
+    public int? ModuleIo { get; set; }
+
+    [TomlPropertyName("module_station")]
+    public int? ModuleStation { get; set; }
 
     /// <summary>Poll period in milliseconds (100..3600000). Default 1000.</summary>
     [TomlPropertyName("interval_ms")]
@@ -264,13 +280,17 @@ public sealed class ClientConfig
 
 public sealed class PollConfig
 {
-    /// <summary>1..4 (read FCs only). Default 3 (read holding registers).</summary>
+    /// <summary>Modbus: 1..4 (read FCs only). Default 3 (filled in Load); rejected on other protocols.</summary>
     [TomlPropertyName("fc")]
-    public int Fc { get; set; } = 3;
+    public int? Fc { get; set; }
 
-    /// <summary>First address on the remote slave.</summary>
+    /// <summary>Modbus: first address on the remote slave. Default 0 (filled in Load).</summary>
     [TomlPropertyName("remote_offset")]
-    public int RemoteOffset { get; set; }
+    public int? RemoteOffset { get; set; }
+
+    /// <summary>mc-3e: head device in MELSEC notation ("D100", "M0", "X1A"); required there, rejected on Modbus.</summary>
+    [TomlPropertyName("remote")]
+    public string? Remote { get; set; }
 
     /// <summary>Number of cells (bits or words). Default 1.</summary>
     [TomlPropertyName("count")]
@@ -297,17 +317,21 @@ public sealed class PollConfig
         _ => null,
     };
 
-    /// <summary>The local table derived from fc (validation ensures kind consistency).</summary>
+    /// <summary>The local table (local_kind is filled in Load and validated).</summary>
     public TableKind EffectiveLocalTable() =>
-        LocalKinds.ToTable(LocalKind ?? DefaultLocalKind(Fc) ?? throw new FormatException($"invalid fc {Fc}"));
+        LocalKinds.ToTable(LocalKind ?? throw new FormatException("local_kind is not set"));
 }
 
 /// <summary>One [[client.push]] line: local cells written to the remote on change.</summary>
 public sealed class PushConfig
 {
-    /// <summary>5|6|15|16 (write FCs only). Default 16 (write multiple registers).</summary>
+    /// <summary>Modbus: 5|6|15|16 (write FCs only). Default 16 (filled in Load); rejected on other protocols.</summary>
     [TomlPropertyName("fc")]
-    public int Fc { get; set; } = 16;
+    public int? Fc { get; set; }
+
+    /// <summary>mc-3e: head device in MELSEC notation ("D100", "M0", "X1A"); required there, rejected on Modbus.</summary>
+    [TomlPropertyName("remote")]
+    public string? Remote { get; set; }
 
     /// <summary>Local table: coil|discrete|holding|input. Default derived from fc.</summary>
     [TomlPropertyName("local_kind")]
@@ -321,9 +345,9 @@ public sealed class PushConfig
     [TomlPropertyName("count")]
     public int Count { get; set; } = 1;
 
-    /// <summary>First address on the remote slave.</summary>
+    /// <summary>Modbus: first address on the remote slave. Default 0 (filled in Load).</summary>
     [TomlPropertyName("remote_offset")]
-    public int RemoteOffset { get; set; }
+    public int? RemoteOffset { get; set; }
 
     [TomlExtensionData]
     public IDictionary<string, object?>? Extra { get; set; }
@@ -338,7 +362,7 @@ public sealed class PushConfig
 
     /// <summary>The local table derived from fc (validation ensures kind consistency).</summary>
     public TableKind EffectiveLocalTable() =>
-        LocalKinds.ToTable(LocalKind ?? DefaultLocalKind(Fc) ?? throw new FormatException($"invalid fc {Fc}"));
+        LocalKinds.ToTable(LocalKind ?? throw new FormatException("local_kind is not set"));
 }
 
 /// <summary>local_kind spelling shared by poll and push.</summary>

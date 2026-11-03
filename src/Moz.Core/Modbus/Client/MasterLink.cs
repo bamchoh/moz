@@ -5,7 +5,7 @@ using RtuAdu = Moz.Modbus.Rtu.Rtu;
 namespace Moz.Modbus.Client;
 
 /// <summary>
-/// The transport under the Modbus master (<see cref="ModbusClientPoller"/>):
+/// The transport under the Modbus master (<see cref="ModbusRemote"/>):
 /// one request PDU in, one response PDU out, over a link that the poller
 /// opens lazily and recovers after errors. TCP (MBAP, persistent socket) and
 /// RTU (serial-like Stream, CRC16) implement it; the poll/push loop above is
