@@ -114,7 +114,7 @@ public static partial class ConfigLoader
 
     private static readonly string[] LogLevels = ["trace", "debug", "info", "warn", "error"];
     private static readonly string[] LogFormats = ["text", "json"];
-    private static readonly string[] Protocols = ["modbus-tcp", "modbus-rtu", "opcua"];
+    private static readonly string[] Protocols = ["modbus-tcp", "modbus-rtu", "opcua", "mc-3e"];
     private static readonly string[] ClientProtocols = ["modbus-tcp", "modbus-rtu", "mc-3e"];
 
     private static void Validate(MozConfig config, string path, List<ConfigError> errors)
@@ -223,6 +223,17 @@ public static partial class ConfigLoader
             }
             CheckSerial("server", server.Baud, server.Parity, server.DataBits, server.StopBits, server.IdleGapMs,
                 $"[server \"{server.Name}\"]", path, errors);
+
+            // mc-3e wiring (phase 13): device maps
+            if (server.Protocol == "mc-3e")
+            {
+                ValidateMcMaps(server, config.Device.FirstOrDefault(d => d.Name == server.Device), path, errors);
+            }
+            else if (server.Map.Count > 0)
+            {
+                errors.Add(new ConfigError(path,
+                    $"server.map is only valid for mc-3e servers, set on \"{server.Name}\" ({server.Protocol})"));
+            }
         }
 
         // duplicate names: devices and servers are separate namespaces,
@@ -551,6 +562,64 @@ public static partial class ConfigLoader
             return null;
         }
         return table;
+    }
+
+    /// <summary>[[server.map]]: known device code, kind of matching bitness, range within the device table, no duplicate codes.</summary>
+    private static void ValidateMcMaps(ServerConfig server, DeviceConfig? device, string path, List<ConfigError> errors)
+    {
+        var ctx = $"[server \"{server.Name}\"]";
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var map in server.Map)
+        {
+            CheckExtra(map.Extra, $"[[server.map]] on \"{server.Name}\"", path, errors);
+            if (!Mc.McDevice.TryFromCode(map.Device, out var dev))
+            {
+                errors.Add(new ConfigError(path,
+                    $"server.map device value \"{map.Device}\" is invalid (device code letters only, e.g. D, M, W, ZR) in {ctx}"));
+                continue;
+            }
+            if (!seen.Add(dev.Code))
+            {
+                errors.Add(new ConfigError(path, $"duplicate server.map device \"{dev.Code}\" in {ctx}"));
+            }
+            if (map.Offset < 0 || map.Offset > ushort.MaxValue)
+            {
+                errors.Add(new ConfigError(path, $"server.map offset value {map.Offset} is out of range 0..65535 in {ctx}"));
+            }
+            if (map.Count is { } c && (c < 1 || c > 65536))
+            {
+                errors.Add(new ConfigError(path, $"server.map count value {c} is out of range 1..65536 in {ctx}"));
+            }
+            if (!LocalKinds.TryParse(map.Kind, out var table))
+            {
+                errors.Add(new ConfigError(path, $"server.map kind value \"{map.Kind}\" is invalid (coil|discrete|holding|input) in {ctx}"));
+                continue;
+            }
+            if (table.IsBit() != dev.IsBit)
+            {
+                errors.Add(new ConfigError(path, dev.IsBit
+                    ? $"server.map kind value \"{map.Kind}\" does not match the bit device {dev.Code} (coil|discrete) in {ctx}"
+                    : $"server.map kind value \"{map.Kind}\" does not match the word device {dev.Code} (holding|input) in {ctx}"));
+                continue;
+            }
+            if (device is null || map.Offset < 0 || map.Count is < 1)
+            {
+                continue;
+            }
+            int length = table switch
+            {
+                TableKind.Coil => device.Coils,
+                TableKind.DiscreteInput => device.Discrete,
+                TableKind.HoldingRegister => device.Holding,
+                _ => device.Input,
+            };
+            int cells = map.Count ?? Math.Max(0, length - map.Offset);
+            if (map.Offset + cells > length || cells == 0)
+            {
+                errors.Add(new ConfigError(path,
+                    $"server.map {dev.Code} offset {map.Offset} (+{cells} cells) exceeds device \"{device.Name}\" {map.Kind} length {length} in {ctx}"));
+            }
+        }
     }
 
     /// <summary>Serial line settings, shared by [[server]] (slave) and [[client]] (master).</summary>

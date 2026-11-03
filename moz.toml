@@ -119,22 +119,19 @@ count = 2
 remote_offset = 20
 
 # MC protocol master (phase 12): same poll/push loop, MELSEC device notation.
-# Commented out because it needs a CPU (or an MC server) to talk to.
-# [[client]]
-# name = "mc-master"
-# protocol = "mc-3e"
-# device = "plc-mirror"
-# remote_addr = "192.168.0.20:5000"
-#
-# [[client.poll]]
-# remote = "D100"
-# count = 4
-# local_offset = 50
-#
-# [[client.push]]
-# remote = "M0"
-# count = 16
-# local_offset = 0
+# Polls D0..D1 (the "temperature" real of plc-a) through the mc-3e server
+# "mc-a" below into plc-mirror holding 50..51.
+[[client]]
+name = "mc-self-poll"
+protocol = "mc-3e"
+device = "plc-mirror"
+remote_addr = "127.0.0.1:5010"
+interval_ms = 1000
+
+[[client.poll]]
+remote = "D0"
+count = 2
+local_offset = 50
 
 # RTU master (phase 11): same poll/push keys, serial keys as on an RTU server.
 # Commented out because it needs a real serial port to open.
@@ -168,6 +165,21 @@ protocol = "modbus-tcp"
 device = "plc-a"
 bind = "127.0.0.1"
 port = 50201
+
+# MC protocol server (phase 13): plc-a as a MELSEC CPU. Default map:
+# D -> holding, M -> coil, X -> discrete (all from 0); add [[server.map]]
+# for other devices, e.g. W -> holding 500.
+[[server]]
+name = "mc-a"
+protocol = "mc-3e"
+device = "plc-a"
+bind = "127.0.0.1"
+port = 5010
+
+[[server.map]]
+device = "W"
+kind = "holding"
+offset = 500
 
 # OPC UA example (phase 7): publish the plc-a variables as nodes.
 # Nodes live under Objects/plc-ua (ns=urn:moz:ua:ns).

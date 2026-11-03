@@ -115,4 +115,69 @@ public class McConfigTests : IDisposable
         Assert.False(result.Ok, "expected a config error containing: " + why);
         Assert.Contains(why, Messages(result));
     }
+
+    // --- [[server]] protocol = "mc-3e" ----------------------------------------------------
+
+    private const string ServerBase =
+        """
+        [[device]]
+        name = "plc1"
+        coils = 100
+        discrete = 100
+        holding = 100
+        input = 100
+
+        [[server]]
+        name = "mc-a"
+        protocol = "mc-3e"
+        device = "plc1"
+        port = 5000
+
+        [[server.map]]
+        device = "W"
+        kind = "input"
+        offset = 10
+        count = 20
+        """;
+
+    [Fact]
+    public void McServer_Loads_WithMap()
+    {
+        var result = Load("srv-ok.toml", ServerBase);
+        Assert.True(result.Ok, Messages(result));
+        var s = result.Config!.Server[0];
+        Assert.Equal("mc-3e", s.Protocol);
+        Assert.Equal(5000, s.Port);
+        var m = Assert.Single(s.Map);
+        Assert.Equal(("W", "input", 10, 20), (m.Device, m.Kind, m.Offset, m.Count));
+    }
+
+    [Fact]
+    public void McServer_Map_CountDefaultsToRestOfTable()
+    {
+        var result = Load("srv-nocount.toml", ServerBase.Replace("count = 20", ""));
+        Assert.True(result.Ok, Messages(result));
+        Assert.Null(result.Config!.Server[0].Map[0].Count);
+    }
+
+    [Theory]
+    [InlineData("device = \"W\"", "device = \"Q\"", "server.map device value \"Q\" is invalid")]
+    [InlineData("device = \"W\"", "device = \"W100\"", "server.map device value \"W100\" is invalid")]
+    [InlineData("kind = \"input\"", "kind = \"coil\"", "server.map kind value \"coil\" does not match the word device W")]
+    [InlineData("kind = \"input\"", "kind = \"regs\"", "server.map kind value \"regs\" is invalid")]
+    [InlineData("offset = 10", "offset = 90", "server.map W offset 90 (+20 cells) exceeds device \"plc1\" input length 100")]
+    [InlineData("offset = 10", "offset = 100", "server.map W offset 100 (+20 cells) exceeds device")]
+    [InlineData("offset = 10\ncount = 20", "offset = 100", "server.map W offset 100 (+0 cells) exceeds device")]
+    [InlineData("count = 20", "count = 0", "server.map count value 0 is out of range")]
+    [InlineData("offset = 10", "offset = -1", "server.map offset value -1 is out of range")]
+    [InlineData("count = 20", "count = 20\n\n[[server.map]]\ndevice = \"w\"\nkind = \"holding\"\noffset = 0", "duplicate server.map device \"W\"")]
+    [InlineData("protocol = \"mc-3e\"", "protocol = \"modbus-tcp\"", "server.map is only valid for mc-3e servers")]
+    [InlineData("port = 5000", "port = 5000\nserial_port = \"COM1\"", "server.serial_port is only valid for serial protocols")]
+    public void McServer_InvalidMap_Fails(string find, string replace, string why)
+    {
+        var toml = ServerBase.Replace(find, replace);
+        var result = Load("srv-bad.toml", toml);
+        Assert.False(result.Ok, "expected a config error containing: " + why);
+        Assert.Contains(why, Messages(result));
+    }
 }

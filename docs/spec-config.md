@@ -119,7 +119,7 @@ value  = [{ speed = 10, on = true, label = "m0" }, { samples = [1.0, 2.0, 3.0, 4
 ```toml
 [[server]]
 name      = "sim-a"   # 必須、一意
-protocol  = "modbus-tcp"  # "modbus-tcp" | "modbus-rtu" | "opcua" (opcua は後節)
+protocol  = "modbus-tcp"  # "modbus-tcp" | "modbus-rtu" | "opcua" | "mc-3e" (opcua / mc-3e は後節)
 device    = "plc-a"   # 参照する device 名 (未宣言名はエラー)
 bind      = "127.0.0.1"  # TCP。省略: 127.0.0.1
 port      = 50200     # TCP。省略: 50200。0 は ephemeral (テスト/CI 用)
@@ -143,6 +143,27 @@ idle_gap_ms = 50        # RTU フレームのアイドル区切り (省略: 50; 
 
 - `serial_port` は modbus-rtu では必須、それ以外の protocol では設定禁止
 - unserved なスレーブアドレスには無応答 (マスタ側はタイムアウト)。詳細は docs/spec-modbus.md の RTU 節
+
+### MC プロトコル (mc-3e) サーバ
+
+```toml
+[[server]]
+name     = "mc-a"
+protocol = "mc-3e"       # 3E フレーム・バイナリ・TCP (docs/spec-mc.md)
+device   = "plc-a"
+bind     = "127.0.0.1"   # 省略: 127.0.0.1
+port     = 5010          # 省略: 50200
+
+[[server.map]]           # MC デバイス → メモリの割り当て (省略可)
+device = "W"             # デバイスコードの英字だけ (D, M, X, Y, W, R, ZR, ...)
+kind   = "holding"       # coil|discrete|holding|input。ビットデバイスはビットテーブル、ワードデバイスはワードテーブル
+offset = 1000            # W0 ↔ holding[1000]
+count  = 100             # W0..W99 (省略: offset からテーブルの残り全部)
+```
+
+- 既定の割り当て: `D → holding 0..`、`M → coil 0..`、`X → discrete 0..` (各テーブルの全長)。`[[server.map]]` に同じコードを書くと置き換わり、他の既定は残る。割り当てのないデバイスへの要求は終了コード C05B
+- 検証: デバイスコードが既知、kind の種別がデバイスに一致、`offset + count` (count 省略時は残り全部、0 セルならエラー) がテーブル長以内、同じコードの重複、不明キー。`map` は mc-3e 以外の protocol では設定禁止
+- `unit_ids` は MC には無く、無視される。終了コードやフレーム規則は docs/spec-mc.md
 
 ## [[client]] — クライアント (マスタ): リモートスレーブのミラー
 
@@ -305,7 +326,10 @@ interval_ms = 500       # 100..3600000 (省略: 1000)
 | log.level | trace/debug/info/warn/error |
 | log.format | text/json |
 | server.parity | none/even/odd |
-| server.protocol | modbus-tcp / modbus-rtu / opcua (他はエラー) |
+| server.protocol | modbus-tcp / modbus-rtu / opcua / mc-3e (他はエラー) |
+| server.map[].device | 既知の MC デバイスコード (英字のみ)、同一 server 内で一意; mc-3e 以外では map 自体が禁止 |
+| server.map[].kind | coil / discrete / holding / input (デバイスの種別と一致) |
+| server.map[].offset + count | device の該当テーブル長以内 (count 省略時は残り全部、1 セル以上) |
 
 - device 名・server 名・struct 名はそれぞれ重複禁止（種類が違えば可）
 - `[[device]]` が 0 件でも `[[server]]` が 0 件でも起動する（何も動かないだけでエラーではない）

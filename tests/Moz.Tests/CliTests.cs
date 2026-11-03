@@ -95,6 +95,29 @@ public class CliTests : IDisposable
     }
 
     [Fact]
+    public async Task Validate_McServer_Exits0()
+    {
+        const string toml =
+            """
+            [[device]]
+            name = "plc1"
+
+            [[server]]
+            name = "mc-a"
+            protocol = "mc-3e"
+            device = "plc1"
+            port = 5000
+
+            [[server.map]]
+            device = "W"
+            kind = "holding"
+            offset = 10000
+            """;
+        var exit = await Moz.Cli.CliApp.Run(["validate", WriteFile("mc-server.toml", toml)]);
+        Assert.Equal(0, exit);
+    }
+
+    [Fact]
     public async Task Validate_McClient_Exits0()
     {
         const string toml =

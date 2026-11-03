@@ -1,6 +1,6 @@
 # moz
 
-PLC の通信をシミュレートするツール。設定ファイル 1 つから Modbus TCP/RTU サーバ（スレーブ側）・Modbus TCP/RTU・三菱 MC プロトコル クライアント（マスタ側のミラー）・OPC UA サーバ・周期 JavaScript スクリプトを同一プロセスで起動する CLI アプリです。
+PLC の通信をシミュレートするツール。設定ファイル 1 つから Modbus TCP/RTU・三菱 MC プロトコル サーバ（スレーブ側）・Modbus TCP/RTU・三菱 MC プロトコル クライアント（マスタ側のミラー）・OPC UA サーバ・周期 JavaScript スクリプトを同一プロセスで起動する CLI アプリです。
 
 karakuri ([bamchoh/karakuri](https://github.com/bamchoh/karakuri)) の再構築作です。設計方針と層構成は [docs/consept.md](docs/consept.md)、仕様は [docs/](docs/) を参照してください。
 
@@ -58,6 +58,7 @@ moz moz.toml
 - [x] 変数の初期値 (`[[variable]] value = ...`、構造体はテーブルで)
 - [x] RTU マスタ (`[[client]] protocol = "modbus-rtu"`、TCP と同じ poll/push)
 - [x] クライアントの汎用化 (`IRemoteDevice`) と MC プロトコル (3E バイナリ TCP) マスタ (`protocol = "mc-3e"`、`remote = "D100"`)
+- [x] MC プロトコル サーバ (`[[server]] protocol = "mc-3e"`、`[[server.map]]` で D/M/X 等をメモリに割り当て)
 
 ## ライセンス
 

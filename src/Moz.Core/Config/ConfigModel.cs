@@ -440,6 +440,32 @@ public sealed class ServerConfig
     [TomlPropertyName("endpoint")]
     public string? Endpoint { get; set; }
 
+    /// <summary>mc-3e only: where MC devices live in the memory model (defaults: D→holding, M→coil, X→discrete).</summary>
+    [TomlPropertyName("map")]
+    public List<McMapConfig> Map { get; set; } = [];
+
+    [TomlExtensionData]
+    public IDictionary<string, object?>? Extra { get; set; }
+}
+
+/// <summary>One [[server.map]] line: MC device code n ↔ table[offset + n], n in 0..count-1.</summary>
+public sealed class McMapConfig
+{
+    /// <summary>Device code letters only ("D", "W", "ZR").</summary>
+    [TomlPropertyName("device")]
+    public string Device { get; set; } = "";
+
+    /// <summary>coil | discrete | holding | input; bitness must match the device.</summary>
+    [TomlPropertyName("kind")]
+    public string Kind { get; set; } = "";
+
+    [TomlPropertyName("offset")]
+    public int Offset { get; set; }
+
+    /// <summary>Device numbers served (0..count-1). Omitted = the rest of the table from offset.</summary>
+    [TomlPropertyName("count")]
+    public int? Count { get; set; }
+
     [TomlExtensionData]
     public IDictionary<string, object?>? Extra { get; set; }
 }

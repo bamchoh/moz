@@ -60,6 +60,23 @@ public readonly record struct McDevice(string Code, byte Binary, bool IsBit, boo
         return true;
     }
 
+    /// <summary>Look up a device by its letters ("D", "zr"); false for an unknown code.</summary>
+    public static bool TryFromCode(string code, out McDevice device)
+    {
+        var upper = code.ToUpperInvariant();
+        int found = Array.FindIndex(Table, d => d.Code == upper);
+        device = found < 0 ? default : Table[found];
+        return found >= 0;
+    }
+
+    /// <summary>Look up a device by its binary code (0xA8 = D); false for an unknown byte.</summary>
+    public static bool TryFromBinary(byte binary, out McDevice device)
+    {
+        int found = Array.FindIndex(Table, d => d.Binary == binary);
+        device = found < 0 ? default : Table[found];
+        return found >= 0;
+    }
+
     /// <summary>The notation for a head device number on this device ("D100", "X1A").</summary>
     public string Format(int address) => Hex ? $"{Code}{address:X}" : $"{Code}{address}";
 }

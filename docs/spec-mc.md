@@ -1,8 +1,8 @@
-# MC プロトコル実装仕様 (フェーズ 12: 3E フレーム・バイナリ・TCP クライアント)
+# MC プロトコル実装仕様 (フェーズ 12: 3E クライアント / フェーズ 13: 3E サーバ)
 
-この文書は `Moz.Core/Mc/` の仕様であり、`tests/Moz.Tests/McFrameTests.cs` (フレーム) と `McRemoteTests.cs` (結合) がこの内容をエンコードしている。両者を同時に更新すること。
+この文書は `Moz.Core/Mc/` の仕様であり、`tests/Moz.Tests/McFrameTests.cs` (フレーム)、`McRemoteTests.cs` (クライアント結合)、`McServerTests.cs` (サーバ) がこの内容をエンコードしている。両者を同時に更新すること。
 
-moz は三菱電機 MC プロトコル (MELSEC Communication Protocol) の **マスタ (クライアント)** として、Q/L/iQ-R シリーズ互換の **3E フレーム・バイナリコード** を TCP で話す。`[[client]] protocol = "mc-3e"` で設定する (docs/spec-config.md)。サーバ (CPU 側のシミュレート) は未実装。
+moz は三菱電機 MC プロトコル (MELSEC Communication Protocol) の Q/L/iQ-R シリーズ互換 **3E フレーム・バイナリコード** を TCP で話す。**サーバ** (CPU 側のシミュレート、`[[server]] protocol = "mc-3e"`) と **クライアント** (マスタ、`[[client]] protocol = "mc-3e"`) の両方がある (設定は docs/spec-config.md)。
 
 ## デバイス表記
 
@@ -59,3 +59,20 @@ moz は三菱電機 MC プロトコル (MELSEC Communication Protocol) の **マ
 - 未対応: ランダム読出し/書込み、モニタ登録、4E フレーム、ASCII コード、iQ-R 拡張デバイスコード (2 バイト)。必要になった時点で追加する
 
 テスト: コーデックは上記ベクタでバイト一致、結合はコーデックを使わず手書きした最小 MC サーバ (ワードデバイス → holding、ビットデバイス → coil、範囲外 → C056、未知コマンド → C059) を相手に poll / push / 終了コード / 無応答タイムアウトからの再接続を検証。実機の CPU では未検証。
+
+## サーバ (`McServer` / `Mc3EServer`) — フェーズ 13
+
+moz を MELSEC CPU に見立てる。`[[server]] protocol = "mc-3e"` で TCP (`bind` / `port`) に立ち、マスタ (SCADA、他の moz の mc-3e クライアント等) からの一括読出し / 一括書込みに device メモリで応える。
+
+**デバイスの割り当て (`[[server.map]]`)**: MC のデバイスは 4 テーブルのメモリモデルに写す。`device = "W"`, `kind = "holding"`, `offset = 1000`, `count = 100` で W0..W99 ↔ holding[1000..1099]。`count` 省略時は offset からテーブルの残り全部。既定で `D → holding 0..`, `M → coil 0..`, `X → discrete 0..` が割り当てられており、同じコードを `[[server.map]]` に書けば置き換わる (他の既定は残る)。割り当てのないデバイスは C05B。ビットデバイスはビットテーブル、ワードデバイスはワードテーブルにしか写せない。同じテーブルの範囲が複数の map で重なってもよい (エイリアス)。
+
+**フレーム処理** (`Mc3EServer.Handle`: 純粋。要求ヘッダ + 本体 → メモリ操作 → 応答):
+
+- ヘッダの検査: サブヘッダ `5000` でない、またはデータ長が 4 未満 → 不正フレームとして **無応答で接続を閉じる** (Modbus の MBAP 不正と同じ扱い、MalformedFrame ログ)。これ以外の要求には必ず応答する
+- 応答はルーティング 5 バイト (ネットワーク, PC, I/O, 局) をエコーし、異常時はエラー情報 (ルーティング + コマンド + サブコマンド) を付ける
+- 終了コード: `C059` 未知のコマンド/サブコマンド、`C05B` 未知または未割り当てのデバイス、`C05C` 単位がデバイス種別に合わない (ビットデバイスをワード単位で等) または読み取り専用テーブル (discrete/input) に写したデバイスへの書込み、`C051` 点数が 0 または上限超過 (ワード 960 / ビット 7168)、`C056` 先頭 + 点数が map の範囲外、`C061` 本体長が点数に合わない
+- 書込みは `IDeviceAccess.Write` (変更通知が出る: 変数ログ・OPC UA・push が反応する)。読出し/書込みとも 1 要求 = 1 回のメモリ操作
+- Request ログ 1 行: `conn=c1 op=read target=D100 qty=3 result=ok` / `err=C056`。接続の accept/close/error は Modbus TCP と同じイベント
+- 未対応: ビットデバイスのワード単位アクセス (M0 を 16 点 1 ワードで読む等 → C05C)、ランダム読出し/書込み、モニタ、4E / ASCII / iQ-R 拡張。`unit_ids` は MC には無い (指定しても無視)
+
+テスト: ハンドラはバイト一致ベクタ (読出し/書込み/各終了コード/ルーティングのエコー/map の上書き)、ランナーは moz 自身の mc-3e クライアントを相手に poll / push、不正サブヘッダで無応答クローズ。

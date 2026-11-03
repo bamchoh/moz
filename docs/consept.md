@@ -1,6 +1,6 @@
 # moz — 構想と設計
 
-moz は PLC の「通信」をシミュレートするツールであり、Modbus TCP/RTU サーバ（スレーブ側）・Modbus TCP/RTU・MC プロトコル クライアント（マスタ側ミラー）・OPC UA サーバ・周期スクリプトを 1 つの設定ファイルから同一プロセスで起動する CLI です。
+moz は PLC の「通信」をシミュレートするツールであり、Modbus TCP/RTU・MC プロトコル サーバ（スレーブ側）・Modbus TCP/RTU・MC プロトコル クライアント（マスタ側ミラー）・OPC UA サーバ・周期スクリプトを 1 つの設定ファイルから同一プロセスで起動する CLI です。
 
 karakuri（先代ツール）の反省を設計指針にしています:
 
@@ -40,6 +40,7 @@ karakuri（先代ツール）の反省を設計指針にしています:
 | 拡張 | 入る場所 | 先行層への影響 |
 |---|---|---|
 | Modbus RTU (シリアル) | `Modbus.Rtu` 新 Runner (phase 5) | なし (codec 共有) |
+| MC プロトコル サーバ | `Mc.McServer` Runner + `Mc3EServer` ハンドラ (phase 13) | なし (`IDeviceAccess` を消費、`McMap` で割り当て) |
 | クライアント (マスタ) | `Modbus` にリクエスト構築半分 + 新 Runner (phase 6) → phase 12 で `Moz.Client` に汎用化 | なし |
 | 新プロトコルのクライアント (MC, OPC UA クライアント, ...) | `IRemoteDevice` 実装 1 つ (phase 12 の `Moz.Mc` が例) + `[[client]]` のキー + `CliApp.BuildRemote` の case | なし (ループ・設定の骨格は共有) |
 | 新プロトコルのサーバ (MC サーバ, ...) | `IProtocolRunner` 実装 1 つ + `[[server]]` のキー + CLI の switch | なし (`IDeviceAccess` を消費) |
@@ -74,3 +75,4 @@ karakuri（先代ツール）の反省を設計指針にしています:
 10. 変数の初期値 (`[[variable]] value = ...`) と poll のローカル範囲検証 ← **完了**
 11. RTU マスタ (`[[client]] protocol = "modbus-rtu"`; マスタのトランスポートを `IMasterLink` に分離し TCP/RTU で共有、メモリ pipe で結合テスト) ← **完了**
 12. クライアントの汎用化 + MC プロトコル (`Moz.Client.ClientPoller` / `IRemoteDevice`; `[[client]] protocol = "mc-3e"` で 3E フレーム・バイナリ・TCP のマスタ、`remote = "D100"` 表記) ← **完了**
+13. MC プロトコル サーバ (`[[server]] protocol = "mc-3e"`; `Mc3EServer` 純粋ハンドラ + `McServer` TCP ランナー、`[[server.map]]` でデバイス → メモリ割り当て、既定 D/M/X) ← **完了**

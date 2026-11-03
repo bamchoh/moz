@@ -194,6 +194,12 @@ public static class CliApp
                         ? vt
                         : new VariableTable(device, [], loggerFactory.CreateLogger($"moz.device.{s.Device}")),
                     loggerFactory.CreateLogger($"moz.server.{s.Name}")),
+                "mc-3e" => new McServer(
+                    s.Name,
+                    new IPEndPoint(IPAddress.Parse(s.Bind!), s.Port),
+                    device,
+                    McMap.Merge(device, s.Map.Select(m => McMapOf(m, device))),
+                    loggerFactory.CreateLogger($"moz.server.{s.Name}")),
                 "modbus-rtu" => new RtuServer(
                     s.Name,
                     OpenSerialPort(s.SerialPort!, s.Baud, s.Parity, s.DataBits, s.StopBits),
@@ -263,6 +269,16 @@ public static class CliApp
                 throw new InvalidOperationException(
                     $"unknown client protocol \"{c.Protocol}\" (already rejected by config validation)");
         }
+    }
+
+    private static McMap McMapOf(McMapConfig m, IDeviceAccess device)
+    {
+        if (!McDevice.TryFromCode(m.Device, out var dev))
+        {
+            throw new InvalidOperationException($"invalid MC device code \"{m.Device}\" (already rejected by config validation)");
+        }
+        var table = LocalKinds.ToTable(m.Kind);
+        return new McMap(dev, table, m.Offset, m.Count ?? device.Length(table) - m.Offset);
     }
 
     private static McEntry McEntryOf(string remote, int count, TableKind table, int localOffset) =>
