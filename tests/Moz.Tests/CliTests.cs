@@ -95,6 +95,34 @@ public class CliTests : IDisposable
     }
 
     [Fact]
+    public async Task Validate_WithInitialValues_Exits0()
+    {
+        const string toml =
+            """
+            [[device]]
+            name = "plc1"
+            holding = 100
+            input = 100
+
+            [[variable]]
+            name = "setpoint"
+            device = "plc1"
+            kind = "input"
+            offset = 0
+            type = "real"
+            value = 20.5
+
+            [[server]]
+            name = "sim"
+            protocol = "modbus-tcp"
+            device = "plc1"
+            port = 50200
+            """;
+        var exit = await Moz.Cli.CliApp.Run(["validate", WriteFile("values.toml", toml)]);
+        Assert.Equal(0, exit);
+    }
+
+    [Fact]
     public async Task Validate_StructConfig_Exits0()
     {
         const string toml =

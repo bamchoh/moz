@@ -325,4 +325,67 @@ public class VariableConfigTests : IDisposable
         Assert.False(result.Ok);
         Assert.Contains(result.Errors, e => e.Message.Contains("type \"time\" requires kind holding|input"));
     }
+
+    // --- value = ... (initial values) -------------------------------------------------
+
+    private static string Messages(Moz.Config.ConfigResult result) =>
+        string.Join("\n", result.Errors.Select(e => e.Message));
+
+    [Fact]
+    public void Value_Loads_ForScalarArrayAndStruct()
+    {
+        var toml = AppendBlock(
+                "[[variable]]\nname = \"flags\"\ndevice = \"plc1\"\nkind = \"coil\"\noffset = 0\ntype = \"bool\"\ncount = 2\nvalue = [true, false]\n"
+                + "\n[[variable]]\nname = \"stamp\"\ndevice = \"plc1\"\nkind = \"holding\"\noffset = 10\ntype = \"dt\"\nvalue = 2026-11-01T09:00:00Z")
+            .Replace("type = \"real\"", "type = \"real\"\nvalue = 20.5");
+        var result = Moz.Config.ConfigLoader.Load(WriteFile("value.toml", toml));
+        Assert.True(result.Ok, Messages(result));
+        Assert.Equal(20.5, result.Config!.Variable[0].Value);
+        Assert.NotNull(result.Config.Variable[1].Value);
+        Assert.NotNull(result.Config.Variable[2].Value);
+    }
+
+    [Theory]
+    [InlineData("value = \"hot\"", "variable.value expects a number")]
+    [InlineData("value = [1.0, 2.0]", "variable.value expects a single value")]
+    public void Value_Invalid_Fails_WithContext(string line, string why)
+    {
+        var toml = Base.Replace("type = \"real\"", "type = \"real\"\n" + line);
+        var result = Moz.Config.ConfigLoader.Load(WriteFile("badvalue.toml", toml));
+        Assert.False(result.Ok);
+        Assert.Contains(why, Messages(result));
+        Assert.Contains("in [[variable]] \"temperature\"", Messages(result));
+    }
+
+    [Theory]
+    [InlineData("{ speed = 70000 }", "variable.value.speed expects an integer in -32768..32767")]
+    [InlineData("{ rpm = 1 }", "unknown field \"value.rpm\"")]
+    [InlineData("[{ speed = 1 }]", "variable.value expects a table")]
+    public void Value_OnStruct_IsCheckedPerField(string value, string why)
+    {
+        var toml = Base.Replace("[[variable]]", $$"""
+            [[struct]]
+            name = "Motor"
+            [[struct.field]]
+            name = "speed"
+            type = "int"
+            [[struct.field]]
+            name = "on"
+            type = "bool"
+
+            [[variable]]
+            name = "motor"
+            device = "plc1"
+            kind = "holding"
+            offset = 50
+            type = "Motor"
+            value = {{value}}
+
+            [[variable]]
+            """);
+        var result = Moz.Config.ConfigLoader.Load(WriteFile("structvalue.toml", toml));
+        Assert.False(result.Ok);
+        Assert.Contains(why, Messages(result));
+        Assert.Contains("in [[variable]] \"motor\"", Messages(result));
+    }
 }

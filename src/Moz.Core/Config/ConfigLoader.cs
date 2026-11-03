@@ -241,6 +241,7 @@ public static partial class ConfigLoader
                     $"client.remote_addr value \"{client.RemoteAddr}\" is invalid (host:port, port 1..65535) in {ctx}"));
             }
 
+            devices.TryGetValue(client.Device, out var device);
             foreach (var poll in client.Poll)
             {
                 var pctx = $"[[client.poll]] on \"{client.Name}\"";
@@ -270,10 +271,10 @@ public static partial class ConfigLoader
                     errors.Add(new ConfigError(path,
                         $"poll.local_offset value {poll.LocalOffset} is out of range 0..65535 in {pctx}"));
                 }
-                CheckLocalKind(poll.LocalKind, poll.Fc, isBit, "poll", pctx, path, errors);
+                var table = CheckLocalKind(poll.LocalKind, poll.Fc, isBit, "poll", pctx, path, errors);
+                CheckLocalRange("poll", device, table, poll.LocalKind, poll.LocalOffset, poll.Count, pctx, path, errors);
             }
 
-            devices.TryGetValue(client.Device, out var device);
             foreach (var push in client.Push)
             {
                 var pctx = $"[[client.push]] on \"{client.Name}\"";
@@ -309,23 +310,7 @@ public static partial class ConfigLoader
                         $"push.local_offset value {push.LocalOffset} is out of range 0..65535 in {pctx}"));
                 }
                 var table = CheckLocalKind(push.LocalKind, push.Fc, isBit, "push", pctx, path, errors);
-                // the local range is read on every push: it must exist on the device
-                if (device is not null && table is { } t && push.Count >= 1 && push.LocalOffset >= 0)
-                {
-                    int length = t switch
-                    {
-                        TableKind.Coil => device.Coils,
-                        TableKind.DiscreteInput => device.Discrete,
-                        TableKind.HoldingRegister => device.Holding,
-                        _ => device.Input,
-                    };
-                    if (push.LocalOffset + push.Count > length)
-                    {
-                        errors.Add(new ConfigError(path,
-                            $"push local_offset {push.LocalOffset} (+{push.Count} cells) exceeds device \"{device.Name}\" " +
-                            $"{push.LocalKind} length {length} in {pctx}"));
-                    }
-                }
+                CheckLocalRange("push", device, table, push.LocalKind, push.LocalOffset, push.Count, pctx, path, errors);
             }
         }
 
@@ -337,6 +322,33 @@ public static partial class ConfigLoader
                 errors.Add(new ConfigError(path,
                     $"[client \"{client.Name}\"] references device \"{client.Device}\" which is not declared"));
             }
+        }
+    }
+
+    /// <summary>
+    /// The local range of a poll (written every tick) or push (read on every
+    /// change) must exist on the device; otherwise every tick would fail at
+    /// runtime. Skipped when earlier checks already failed (no device, bad
+    /// kind, bad count/offset).
+    /// </summary>
+    private static void CheckLocalRange(string key, DeviceConfig? device, TableKind? table, string? kind,
+        int offset, int count, string ctx, string path, List<ConfigError> errors)
+    {
+        if (device is null || table is not { } t || count < 1 || offset < 0)
+        {
+            return;
+        }
+        int length = t switch
+        {
+            TableKind.Coil => device.Coils,
+            TableKind.DiscreteInput => device.Discrete,
+            TableKind.HoldingRegister => device.Holding,
+            _ => device.Input,
+        };
+        if (offset + count > length)
+        {
+            errors.Add(new ConfigError(path,
+                $"{key} local_offset {offset} (+{count} cells) exceeds device \"{device.Name}\" {kind} length {length} in {ctx}"));
         }
     }
 

@@ -109,6 +109,14 @@ public sealed class VariableConfig
     [TomlPropertyName("length")]
     public int? Length { get; set; }
 
+    /// <summary>
+    /// Initial value seeded at startup: a TOML scalar, an array of count
+    /// elements, or a table for struct types (see <see cref="InitialValues"/>).
+    /// Null = not given (memory starts at 0).
+    /// </summary>
+    [TomlPropertyName("value")]
+    public object? Value { get; set; }
+
     [TomlExtensionData]
     public IDictionary<string, object?>? Extra { get; set; }
 

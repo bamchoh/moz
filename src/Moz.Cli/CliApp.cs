@@ -128,10 +128,18 @@ public static class CliApp
         {
             // struct-typed declarations expand into dotted leaf variables here;
             // the VariableTable (and everything above it) only sees leaves
-            var variables = config.Variable.Where(v => v.Device == d.Name).SelectMany(v =>
-                VariableLayout.Expand(v.Name, v.ToTableKind(), v.Offset, v.Type, v.Count, v.Length ?? 0, structs));
+            var declared = config.Variable.Where(v => v.Device == d.Name).Select(v =>
+                (Config: v, Leaves: VariableLayout.Expand(v.Name, v.ToTableKind(), v.Offset, v.Type, v.Count, v.Length ?? 0, structs))).ToList();
             variableTables[d.Name] = new VariableTable(
-                devices[d.Name], variables, loggerFactory!.CreateLogger($"moz.device.{d.Name}"));
+                devices[d.Name], declared.SelectMany(x => x.Leaves), loggerFactory!.CreateLogger($"moz.device.{d.Name}"));
+            // initial values (value = ...): seeded before any runner starts, no change log
+            foreach (var (v, leaves) in declared)
+            {
+                if (v.Value is { } value)
+                {
+                    InitialValues.Apply(devices[d.Name], InitialValues.Resolve(v.Name, v.Count, value, leaves));
+                }
+            }
         }
 
         var runners = new List<IProtocolRunner>();

@@ -38,6 +38,7 @@ device = "plc-a"
 kind = "holding"
 offset = 0
 type = "real"
+value = 20.0            # initial value, seeded before anything runs
 
 [[variable]]
 name = "temperature-mirror"
@@ -75,6 +76,7 @@ device = "plc-a"
 kind = "holding"
 offset = 100
 type = "Motor"
+value = { speed = 100, on = false, label = "idle" }   # struct initial value (fields left out stay 0)
 
 [[variable]]
 name = "updated"

@@ -160,6 +160,26 @@ public static partial class ConfigLoader
             int cells = leaves.Sum(l => l.Cells);
             CheckVariableRange(variable, device, table, cells, path, errors);
             CheckVariableOverlap(variable, cells, ranges, path, errors);
+            if (variable.Value is { } value && leaves.Count > 0 && variable.Count >= 1)
+            {
+                CheckInitialValue(variable, value, leaves, ctx, path, errors);
+            }
+        }
+    }
+
+    /// <summary>value = ... must convert through the same resolver startup uses.</summary>
+    private static void CheckInitialValue(VariableConfig variable, object value, IReadOnlyList<Variable> leaves,
+        string ctx, string path, List<ConfigError> errors)
+    {
+        try
+        {
+            InitialValues.Resolve(variable.Name, variable.Count, value, leaves);
+        }
+        catch (FormatException ex)
+        {
+            // messages start with the offending path ("value", "value.speed", "value[1]") or "unknown field"
+            var message = ex.Message.StartsWith("value", StringComparison.Ordinal) ? "variable." + ex.Message : "variable.value: " + ex.Message;
+            errors.Add(new ConfigError(path, $"{message} in {ctx}"));
         }
     }
 

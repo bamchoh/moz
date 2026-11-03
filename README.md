@@ -55,6 +55,7 @@ moz moz.toml
 - [x] クライアント (マスタ; `[[client]]`, リモートスレーブのミラー + `[[client.push]]` による書き戻し、`plc.getVariableStatus` で連携状態)
 - [x] OPC UA (in-process; 変数→ノード公開、配列ノード、サブスクリプション通知)
 - [x] 文字列・時刻型 (`string`/`time`/`tod`/`date`/`dt`) と構造体 (`[[struct]]`、葉変数へ展開)
+- [x] 変数の初期値 (`[[variable]] value = ...`、構造体はテーブルで)
 
 ## ライセンス
 

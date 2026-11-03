@@ -281,4 +281,13 @@ public class ClientConfigTests : IDisposable
         Assert.Equal(15, pushes[1].Fc);
         Assert.Equal(300, pushes[1].RemoteOffset);
     }
+
+    [Fact]
+    public void Poll_LocalRange_MustFitDevice()
+    {
+        var toml = Base.Replace("name = \"plc-mirror\"", "name = \"plc-mirror\"\n        holding = 8");
+        var result = Load("pollrange.toml", toml); // poll: count 10 at local_offset 0
+        Assert.False(result.Ok);
+        Assert.Contains(result.Errors, e => e.Message.Contains("poll local_offset 0 (+10 cells) exceeds device \"plc-mirror\" holding length 8"));
+    }
 }

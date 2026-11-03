@@ -41,6 +41,7 @@ offset = 0           # 0ベースの開始位置
 type   = "real"      # bool | int | uint | dint | udint | real | lint | ulint | string | time | tod | date | dt | 宣言済みの構造体名
 count  = 4           # 配列要素数 (省略: 1)
 length = 16          # string のみ: バイト長 (1..250、必須)。他の型では指定するとエラー
+value  = [1.0, 2.0, 3.0, 4.0]  # 初期値 (省略可)。起動時にメモリへ書き込まれる
 ```
 
 - 型とサイズ（レジスタはビッグエンディアン）:
@@ -62,6 +63,12 @@ length = 16          # string のみ: バイト長 (1..250、必須)。他の型
 - 時刻型のレジスタ配置は karakuri と同じ (time=int32, tod=uint32, date/dt=uint64)。変更ログは time/tod を整数 ms、date/dt を `2026-11-01T09:30:00Z` (ISO-8601 UTC、西暦 9999 年超は整数のまま)、string を `"..."` (`"` と `\` は `\` でエスケープ) で出力する
 - `count > 1` で配列。要素は offset, offset+1, ... に並ぶ (string は要素ごとに ceil(length/2) ワード)
 - `type` に `[[struct]]` で宣言した構造体名を書くと構造体変数になる (下記)
+- **初期値 `value`** (省略可): 起動時、どのサーバ・スクリプト・クライアントも動く前にメモリへ書き込まれる (変更ログは出ない)。省略した変数は 0 / false / 空文字列のまま。coil/discrete/holding/input のどのテーブルにも書ける (読み取り専用テーブルの「センサ値」を仕込む用途)
+  - スカラ: TOML の値 1 つ。`count > 1` なら要素数ちょうどの配列 (`[1, 2, 3]`)
+  - bool は `true`/`false`、整数型は TOML 整数 (`0xFFFF` も可) で型の値域内、real は整数か小数、string は length バイト (UTF-8) 以内
+  - time/tod は整数ミリ秒、date/dt は TOML 日時 (`2026-11-01T09:00:00Z`; オフセット無しのローカル日時は UTC とみなす) か Unix epoch からの整数秒。date は 0 時 UTC へ切り捨て。1970 年より前はエラー
+  - 構造体: フィールド名をキーにしたテーブル (`value = { speed = 10, on = true }`)。ネストはテーブルの入れ子、フィールド配列は配列、構造体配列は要素数ちょうどのテーブル配列 (`[{ speed = 1 }, { speed = 2 }]`)。書かなかったフィールドは 0 のまま、未知のフィールドはエラー
+  - 型・値域・要素数の誤りは `moz validate` が `variable.value.speed expects an integer in -32768..32767 (got 70000)` の形で報告する
 - **重複禁止**: 同一 device 内で変数名の重複、および同一 (device, kind) の範囲重複は設定エラー。別 device なら同じ名前・同じ offset でよい
 - 変更通知は 1 回の書き込みバッチにつき 1 行。マスタが生レジスタを書いても変数として観測される
 
@@ -98,6 +105,7 @@ kind   = "holding"      # 構造体は holding | input のみ (coil/discrete は
 offset = 100
 type   = "Motor"        # 語数 = 1 + 1 + 3 + 8 = 13
 count  = 2              # 構造体配列: 要素ごとに 13 ワードずつ並ぶ
+value  = [{ speed = 10, on = true, label = "m0" }, { samples = [1.0, 2.0, 3.0, 4.0] }]  # 初期値 (省略可、要素ごとのテーブル)
 ```
 
 - **展開**: 設定読込時に構造体変数は「葉変数」へ展開され、以降の層 (変数テーブル、スクリプト、変更ログ、OPC UA) は葉だけを見る。葉の名前は `motor.speed`、ネストは `drive.motor.rpm`、構造体配列は `motors[0].on` (0 始まり)。フィールド配列は 1 つの葉に `count` を持つ (`motor.samples`、`readVariable('motor.samples', 2)` で要素アクセス)
@@ -170,6 +178,7 @@ remote_offset = 20      # リモートの開始アドレス
 poll (リモート → ローカル):
 
 - `local_kind` は fc と同じ大きさ (ビット/ワード) でなければエラー。例: リモートの holding をローカルの input として公開する等の用途で指定する
+- ローカル範囲 (`local_offset` + `count`) は device の該当テーブル長に収まること (毎 tick 書き込む範囲なので `poll local_offset 0 (+10 cells) exceeds device ... length` で設定エラー)
 - ミラーは 1 回の poll につき 1 回の device 書き込み (= 1 つの変数変更イベント)
 - 接続・タイムアウト・例外応答・解析エラーはすべて WARN ログ 1 行で、次の tick は普通に動く。通信エラーがあってもプロセスは止まらない
 
@@ -210,6 +219,7 @@ interval_ms = 500       # 100..3600000 (省略: 1000)
 | server.endpoint | opcua のみ必須。`opc.tcp://host:port` (port 1..65535) |
 | variable.count | 1 .. |
 | variable.length | 1 .. 250 (string のみ、必須) |
+| variable.value | 型の値域内、配列は count 要素ちょうど、string は length バイト以内 |
 | struct.field.count | 1 .. |
 | struct.field.length | 1 .. 250 (string のみ、必須) |
 | client.remote_unit | 0 .. 247 |
@@ -219,6 +229,7 @@ interval_ms = 500       # 100..3600000 (省略: 1000)
 | client.poll[].count | ワード FC: 1 .. 125、ビット FC: 1 .. 2000 |
 | client.push[].fc | 5, 6, 15, 16 |
 | client.push[].count | fc 5/6: 1、fc 15: 1 .. 1968、fc 16: 1 .. 123 |
+| client.poll[].local_offset + count | device の該当テーブル長以内 |
 | client.push[].local_offset + count | device の該当テーブル長以内 |
 | script.interval_ms | 100 .. 3600000 |
 | log.level | trace/debug/info/warn/error |
