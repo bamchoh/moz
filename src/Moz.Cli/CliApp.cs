@@ -202,7 +202,7 @@ public static class CliApp
                     new OpcUaServerOptions(
                         s.User.Select(u => new OpcUaUser(u.Name, u.Password, u.Access == "write")).ToArray(),
                         s.Anonymous switch { "read" => OpcUaAccess.Read, "deny" => OpcUaAccess.Deny, _ => OpcUaAccess.Write },
-                        (s.Security ?? ["none"]).Select(v => OpcUaSecurityExtensions.Parse(v) ?? OpcUaSecurity.None).ToArray(),
+                        (s.Security ?? ["none"]).Select(v => OpcUaSecurity.Parse(v) ?? OpcUaSecurity.None).ToArray(),
                         s.Pki is null ? null : Path.Combine(configDir, s.Pki),
                         s.AcceptUntrusted ?? true)),
                 "mc-3e" => new McServer(
@@ -278,7 +278,7 @@ public static class CliApp
                     c.Push.Select(p => new OpcUaEntry(OpcUaRemote.ParseNode(p.Node!), leaves[p.Variable!])).ToArray(),
                     logger,
                     new OpcUaClientOptions(
-                        OpcUaSecurityExtensions.Parse(c.Security ?? "none") ?? OpcUaSecurity.None,
+                        OpcUaSecurity.Parse(c.Security ?? "none") ?? OpcUaSecurity.None,
                         c.User, c.Password,
                         c.Pki is null ? null : Path.Combine(configDir, c.Pki),
                         c.AcceptUntrusted ?? true));

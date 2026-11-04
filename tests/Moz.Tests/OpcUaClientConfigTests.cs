@@ -165,8 +165,18 @@ public class OpcUaClientConfigTests : IDisposable
         Assert.Equal(("sign-encrypt", "operator", "op-pass", false, "pki/ua1"), (c.Security, c.User, c.Password, c.AcceptUntrusted, c.Pki));
     }
 
+    [Fact]
+    public void ClientSecurity_OtherPolicy_Loads()
+    {
+        var toml = Base.Replace("endpoint = \"opc.tcp://192.168.0.30:4840\"", "endpoint = \"opc.tcp://192.168.0.30:4840\"\nsecurity = \"aes256-sha256-rsapss:sign-encrypt\"");
+        var r = Load("csecpol.toml", toml);
+        Assert.True(r.Ok, Messages(r));
+        Assert.Equal("aes256-sha256-rsapss:sign-encrypt", r.Config!.Client[0].Security);
+    }
+
     [Theory]
     [InlineData("security = \"tls\"", "client.security value \"tls\" is invalid")]
+    [InlineData("security = \"basic256:encrypt\"", "client.security value \"basic256:encrypt\" is invalid")]
     [InlineData("user = \"operator\"", "client.password is required when client.user is set")]
     [InlineData("password = \"x\"", "client.user is required when client.password is set")]
     public void ClientSecurity_Invalid_Fail(string line, string why)

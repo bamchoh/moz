@@ -174,8 +174,18 @@ public class OpcUaConfigTests : IDisposable
         Assert.Equal("pki/ua-a", s.Pki);
     }
 
+    [Fact]
+    public void Security_OtherPolicies_Load()
+    {
+        var r = Load("secpol.toml", Base + "\nsecurity = [\"aes256-sha256-rsapss:sign-encrypt\", \"aes128-sha256-rsaoaep:sign\", \"basic128rsa15:sign\", \"sign\"]\n");
+        Assert.True(r.Ok, string.Join("\n", r.Errors));
+        Assert.Equal(4, r.Config!.Server[0].Security!.Count);
+    }
+
     [Theory]
     [InlineData("security = [\"tls\"]", "server.security value \"tls\" is invalid")]
+    [InlineData("security = [\"aes256-sha256-rsapss\"]", "server.security value \"aes256-sha256-rsapss\" is invalid (none|sign|sign-encrypt|<policy>:sign|<policy>:sign-encrypt")]
+    [InlineData("security = [\"sign\", \"basic256sha256:sign\"]", "duplicate server.security value \"basic256sha256:sign\"")]
     [InlineData("security = []", "server.security must list at least one")]
     [InlineData("security = [\"none\", \"none\"]", "duplicate server.security value \"none\"")]
     public void Security_Invalid_Fail(string line, string why)

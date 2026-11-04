@@ -81,3 +81,4 @@ karakuri（先代ツール）の反省を設計指針にしています:
 14. OPC UA クライアント (`[[client]] protocol = "opcua"`; `node` ↔ `variable`、匿名 / None、周期 Read + Write) ← **完了**。サブスクリプション (MonitoredItem による変更通知) は後続フェーズ
 15. 起動順 (`RunnerHost`: サーバ → Ready → クライアント/スクリプト) と OPC UA サーバのユーザー管理 (`[[server.user]]` name/password/access、`anonymous`; SDK 2.0 の IdentityRegistry にユーザー名認証を登録、書込み権限はノードマネージャで判定) ← **完了**
 16. OPC UA セキュア通信 (`server.security` = none / sign / sign-encrypt (Basic256Sha256)、`accept_untrusted` + `pki` の信頼リスト; クライアント側も `security` / `user` / `password` / `accept_untrusted` / `pki`) ← **完了**
+17. OPC UA の RSA 系ポリシー全種 (`<policy>:sign|sign-encrypt`: basic128rsa15 / basic256 / basic256sha256 / aes128-sha256-rsaoaep / aes256-sha256-rsapss; ECC は未対応) ← **完了**

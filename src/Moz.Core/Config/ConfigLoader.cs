@@ -371,7 +371,10 @@ public static partial class ConfigLoader
                     errors.Add(new ConfigError(path,
                         $"client.serial_port is only valid for serial protocols (modbus-rtu), set in {ctx} ({client.Protocol})"));
                 }
-                CheckChoice(client.Security, ["none", "sign", "sign-encrypt"], "client.security", path, errors, defaultIs: "none", context: ctx);
+                if (client.Security is { } sec && OpcUa.OpcUaSecurity.Parse(sec) is null)
+                {
+                    errors.Add(new ConfigError(path, $"client.security value \"{sec}\" is invalid ({OpcUa.OpcUaSecurity.Spellings}) in {ctx}"));
+                }
                 if (client.User is not null && string.IsNullOrEmpty(client.Password))
                 {
                     errors.Add(new ConfigError(path, $"client.password is required when client.user is set in {ctx}"));
@@ -761,13 +764,17 @@ public static partial class ConfigLoader
             errors.Add(new ConfigError(path, $"server.security must list at least one of none|sign|sign-encrypt in {ctx}"));
             return;
         }
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var seen = new HashSet<OpcUa.OpcUaSecurity>();
         foreach (var value in server.Security ?? [])
         {
-            CheckChoice(value, ["none", "sign", "sign-encrypt"], "server.security", path, errors, defaultIs: "none", context: ctx);
-            if (!seen.Add(value))
+            var parsed = OpcUa.OpcUaSecurity.Parse(value);
+            if (parsed is null)
             {
-                errors.Add(new ConfigError(path, $"duplicate server.security value \"{value}\" in {ctx}"));
+                errors.Add(new ConfigError(path, $"server.security value \"{value}\" is invalid ({OpcUa.OpcUaSecurity.Spellings}) in {ctx}"));
+            }
+            else if (!seen.Add(parsed.Value))
+            {
+                errors.Add(new ConfigError(path, $"duplicate server.security value \"{parsed.Value}\" in {ctx}"));
             }
         }
     }

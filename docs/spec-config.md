@@ -377,9 +377,9 @@ interval_ms = 500       # 100..3600000 (省略: 1000)
 | server.anonymous | write / read / deny (opcua のみ; 省略: ユーザー無しなら write、ありなら deny) |
 | server.user[].name / password | 必須 (name は一意); opcua 以外では user 自体が禁止 |
 | server.user[].access | read / write (省略: write) |
-| server.security | none / sign / sign-encrypt を 1 つ以上、重複なし (opcua のみ; 省略: ["none"]) |
+| server.security | none / sign / sign-encrypt / `<policy>:sign` / `<policy>:sign-encrypt` を 1 つ以上、重複なし (opcua のみ; 省略: ["none"]) |
 | server.accept_untrusted / pki | opcua のみ (省略: true / 実行ファイル隣の pki-<name>) |
-| client.security | none / sign / sign-encrypt (opcua のみ; 省略: none) |
+| client.security | server.security と同じ書き方の 1 値 (opcua のみ; 省略: none) |
 | client.user / password | 両方そろえて指定 (opcua のみ) |
 | client.accept_untrusted / pki | opcua のみ (省略: true / 一時フォルダ) |
 
@@ -488,14 +488,24 @@ name     = "ua-a"
 protocol = "opcua"
 device   = "plc-a"
 endpoint = "opc.tcp://127.0.0.1:4840"
-security = ["none", "sign", "sign-encrypt"]   # 出すエンドポイント (省略: ["none"])。sign / sign-encrypt は Basic256Sha256
+security = ["none", "sign", "aes256-sha256-rsapss:sign-encrypt"]   # 出すエンドポイント (省略: ["none"])。sign / sign-encrypt だけなら Basic256Sha256
 accept_untrusted = true                        # 省略: true。false なら trusted/certs にある証明書のクライアントだけ受け付ける
 pki      = "pki/ua-a"                          # 省略: 実行ファイルの隣の pki-<name>。config からの相対パス
 ```
 
-- `security` の各値が 1 つのエンドポイントになる: `none` = SecurityPolicy None / MessageSecurityMode None、`sign` = Basic256Sha256 / Sign、`sign-encrypt` = Basic256Sha256 / SignAndEncrypt。1 つ以上、重複不可。`none` を含めなければ平文の接続はできない
+- `security` の各値が 1 つのエンドポイントになる。書き方は `none`、`sign` / `sign-encrypt` (Basic256Sha256 の略記)、または `<policy>:sign` / `<policy>:sign-encrypt`。policy は次の RSA 系 5 種 (大文字小文字は区別しない):
+
+  | policy | SecurityPolicy URI | 備考 |
+  |---|---|---|
+  | `basic128rsa15` | Basic128Rsa15 | 非推奨 (古いクライアントとの接続試験用) |
+  | `basic256` | Basic256 | 非推奨 (同上) |
+  | `basic256sha256` | Basic256Sha256 | `sign` / `sign-encrypt` の略記はこれ |
+  | `aes128-sha256-rsaoaep` | Aes128_Sha256_RsaOaep | |
+  | `aes256-sha256-rsapss` | Aes256_Sha256_RsaPss | 推奨 (最も強い) |
+
+  1 つ以上、重複不可 (`sign` と `basic256sha256:sign` は同じ値で重複扱い)。`none` を含めなければ平文の接続はできない。どのポリシーも同じ RSA 2048 の自己署名証明書を使う。ECC 系ポリシー (ECC_nistP256 等) は ECC 証明書を別途持つ必要があり未対応
 - サーバ証明書は自己署名を `<pki>/own` に自動生成する (CN=moz-<name>)。クライアント側は通常「信頼する」操作が必要 (UAExpert 等)
 - `accept_untrusted = false` のとき、`<pki>/trusted/certs` に無いクライアント証明書は `BadSecurityChecksFailed` で拒否され、その証明書は `<pki>/rejected/certs` に保存される。そのファイルを `trusted/certs` へ移せば次の接続から受け付ける (再起動不要)。`none` エンドポイントではクライアント証明書を検証しない
 - 発行者 (CA) チェーンは `<pki>/issuer/certs`。CRL、証明書の有効期限ポリシー、GDS は未対応
-- `[[client]] protocol = "opcua"` 側のキー: `security = "none" | "sign" | "sign-encrypt"` (省略: none; サーバがそのエンドポイントを出していなければ接続エラー `offers no SecurityPolicy ...`)、`user` / `password` (UserName トークン; 片方だけはエラー)、`accept_untrusted` (省略: true)、`pki` (省略: 一時フォルダ `moz-ua-client/<client名>`)。クライアント証明書も自己署名で自動生成される
+- `[[client]] protocol = "opcua"` 側のキー: `security` はサーバと同じ書き方の 1 値 (`"none"` / `"sign"` / `"aes256-sha256-rsapss:sign-encrypt"` 等; 省略: none; サーバがそのエンドポイントを出していなければ接続エラー `offers no SecurityPolicy ...`)、`user` / `password` (UserName トークン; 片方だけはエラー)、`accept_untrusted` (省略: true)、`pki` (省略: 一時フォルダ `moz-ua-client/<client名>`)。クライアント証明書も自己署名で自動生成される
 - `security` / `accept_untrusted` / `pki` は opcua 以外の protocol では設定禁止 (server / client とも)

@@ -11,12 +11,83 @@ public enum OpcUaAccess
     Write,
 }
 
-/// <summary>A secure-channel flavour: no security, or Basic256Sha256 signed / signed and encrypted.</summary>
-public enum OpcUaSecurity
+/// <summary>The RSA security policies moz offers / connects with (ECC policies need ECC certificates and are not offered).</summary>
+public enum OpcUaPolicy
 {
     None,
-    Sign,
-    SignAndEncrypt,
+    Basic128Rsa15,
+    Basic256,
+    Basic256Sha256,
+    Aes128Sha256RsaOaep,
+    Aes256Sha256RsaPss,
+}
+
+/// <summary>
+/// One endpoint flavour: a security policy and a message security mode.
+/// Config spelling: "none", "sign" / "sign-encrypt" (Basic256Sha256), or
+/// "&lt;policy&gt;:sign" / "&lt;policy&gt;:sign-encrypt" with policy =
+/// basic128rsa15 | basic256 | basic256sha256 | aes128-sha256-rsaoaep |
+/// aes256-sha256-rsapss.
+/// </summary>
+public readonly record struct OpcUaSecurity(OpcUaPolicy Policy, MessageSecurityMode Mode)
+{
+    public static OpcUaSecurity None => new(OpcUaPolicy.None, MessageSecurityMode.None);
+    public static OpcUaSecurity Sign => new(OpcUaPolicy.Basic256Sha256, MessageSecurityMode.Sign);
+    public static OpcUaSecurity SignAndEncrypt => new(OpcUaPolicy.Basic256Sha256, MessageSecurityMode.SignAndEncrypt);
+
+    /// <summary>The accepted spellings, for error messages.</summary>
+    public const string Spellings = "none|sign|sign-encrypt|<policy>:sign|<policy>:sign-encrypt; policy = basic128rsa15|basic256|basic256sha256|aes128-sha256-rsaoaep|aes256-sha256-rsapss";
+
+    private static readonly (string Name, OpcUaPolicy Policy, string Uri)[] Policies =
+    [
+        ("basic128rsa15", OpcUaPolicy.Basic128Rsa15, SecurityPolicies.Basic128Rsa15),
+        ("basic256", OpcUaPolicy.Basic256, SecurityPolicies.Basic256),
+        ("basic256sha256", OpcUaPolicy.Basic256Sha256, SecurityPolicies.Basic256Sha256),
+        ("aes128-sha256-rsaoaep", OpcUaPolicy.Aes128Sha256RsaOaep, SecurityPolicies.Aes128_Sha256_RsaOaep),
+        ("aes256-sha256-rsapss", OpcUaPolicy.Aes256Sha256RsaPss, SecurityPolicies.Aes256_Sha256_RsaPss),
+    ];
+
+    /// <summary>Config spelling to a flavour; null for anything else (case-insensitive).</summary>
+    public static OpcUaSecurity? Parse(string text)
+    {
+        var lower = text.Trim().ToLowerInvariant();
+        switch (lower)
+        {
+            case "none":
+                return None;
+            case "sign":
+                return Sign;
+            case "sign-encrypt":
+                return SignAndEncrypt;
+        }
+        int colon = lower.IndexOf(':');
+        if (colon <= 0)
+        {
+            return null;
+        }
+        var policyName = lower[..colon];
+        var mode = lower[(colon + 1)..] switch
+        {
+            "sign" => MessageSecurityMode.Sign,
+            "sign-encrypt" => MessageSecurityMode.SignAndEncrypt,
+            _ => MessageSecurityMode.Invalid,
+        };
+        int found = Array.FindIndex(Policies, x => x.Name == policyName);
+        return found < 0 || mode == MessageSecurityMode.Invalid ? null : new OpcUaSecurity(Policies[found].Policy, mode);
+    }
+
+    /// <summary>The SDK policy URI and mode; policy None always means mode None, so `default` is a valid "no security".</summary>
+    public (string PolicyUri, MessageSecurityMode Mode) ToSdk() => Policy == OpcUaPolicy.None
+        ? (SecurityPolicies.None, MessageSecurityMode.None)
+        : (Entry(Policy).Uri, Mode);
+
+    /// <summary>Canonical config spelling ("basic256sha256:sign", "none").</summary>
+    public override string ToString() => Policy == OpcUaPolicy.None
+        ? "none"
+        : $"{Entry(Policy).Name}:{(Mode == MessageSecurityMode.Sign ? "sign" : "sign-encrypt")}";
+
+    private static (string Name, OpcUaPolicy Policy, string Uri) Entry(OpcUaPolicy policy) =>
+        Policies[Array.FindIndex(Policies, x => x.Policy == policy)];
 }
 
 /// <summary>One [[server.user]]: name, password (compared as given) and whether writes are allowed.</summary>
@@ -61,30 +132,11 @@ public sealed record OpcUaServerOptions(
 /// without being in the trusted store.
 /// </summary>
 public sealed record OpcUaClientOptions(
-    OpcUaSecurity Security = OpcUaSecurity.None,
+    OpcUaSecurity Security = default,
     string? User = null,
     string? Password = null,
     string? Pki = null,
     bool AcceptUntrusted = true)
 {
     public static OpcUaClientOptions Default { get; } = new();
-}
-
-public static class OpcUaSecurityExtensions
-{
-    public static (string PolicyUri, MessageSecurityMode Mode) ToSdk(this OpcUaSecurity security) => security switch
-    {
-        OpcUaSecurity.Sign => (SecurityPolicies.Basic256Sha256, MessageSecurityMode.Sign),
-        OpcUaSecurity.SignAndEncrypt => (SecurityPolicies.Basic256Sha256, MessageSecurityMode.SignAndEncrypt),
-        _ => (SecurityPolicies.None, MessageSecurityMode.None),
-    };
-
-    /// <summary>Config spelling ("none" | "sign" | "sign-encrypt") to the enum; null for anything else.</summary>
-    public static OpcUaSecurity? Parse(string text) => text switch
-    {
-        "none" => OpcUaSecurity.None,
-        "sign" => OpcUaSecurity.Sign,
-        "sign-encrypt" => OpcUaSecurity.SignAndEncrypt,
-        _ => null,
-    };
 }
