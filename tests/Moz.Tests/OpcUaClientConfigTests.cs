@@ -174,6 +174,15 @@ public class OpcUaClientConfigTests : IDisposable
         Assert.Equal("aes256-sha256-rsapss:sign-encrypt", r.Config!.Client[0].Security);
     }
 
+    [Fact]
+    public void ClientSecurity_Ua105Policy_Loads()
+    {
+        var toml = Base.Replace("endpoint = \"opc.tcp://192.168.0.30:4840\"", "endpoint = \"opc.tcp://192.168.0.30:4840\"\nsecurity = \"rsa-dh-chachapoly:sign-encrypt\"");
+        var r = Load("csecpol2.toml", toml);
+        Assert.True(r.Ok, Messages(r));
+        Assert.Equal("rsa-dh-chachapoly:sign-encrypt", r.Config!.Client[0].Security);
+    }
+
     [Theory]
     [InlineData("security = \"tls\"", "client.security value \"tls\" is invalid")]
     [InlineData("security = \"basic256:encrypt\"", "client.security value \"basic256:encrypt\" is invalid")]

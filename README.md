@@ -61,7 +61,7 @@ moz moz.toml
 - [x] MC プロトコル サーバ (`[[server]] protocol = "mc-3e"`、`[[server.map]]` で D/M/X 等をメモリに割り当て)
 - [x] OPC UA クライアント (`[[client]] protocol = "opcua"`、ノード ↔ 型付き変数、周期 Read + Write; サブスクリプションは今後)
 - [x] 起動順 (サーバの準備完了後にクライアント/スクリプト) と OPC UA サーバのユーザー管理 (`[[server.user]]`、匿名の write/read/deny)
-- [x] OPC UA セキュア通信 (`security = ["none", "sign", "aes256-sha256-rsapss:sign-encrypt"]` など RSA 系 5 ポリシー、`accept_untrusted` と pki 信頼リスト; クライアント側も選択可)
+- [x] OPC UA セキュア通信 (`security = ["none", "sign", "aes256-sha256-rsapss:sign-encrypt"]` など RSA 系 7 ポリシー (OPC UA 1.05 の `rsa-dh-aesgcm` / `rsa-dh-chachapoly` を含む)、`accept_untrusted` と pki 信頼リスト; クライアント側も選択可)
 
 ## ライセンス
 

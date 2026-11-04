@@ -493,7 +493,7 @@ accept_untrusted = true                        # 省略: true。false なら tru
 pki      = "pki/ua-a"                          # 省略: 実行ファイルの隣の pki-<name>。config からの相対パス
 ```
 
-- `security` の各値が 1 つのエンドポイントになる。書き方は `none`、`sign` / `sign-encrypt` (Basic256Sha256 の略記)、または `<policy>:sign` / `<policy>:sign-encrypt`。policy は次の RSA 系 5 種 (大文字小文字は区別しない):
+- `security` の各値が 1 つのエンドポイントになる。書き方は `none`、`sign` / `sign-encrypt` (Basic256Sha256 の略記)、または `<policy>:sign` / `<policy>:sign-encrypt`。policy は次の RSA 系 7 種 (大文字小文字は区別しない):
 
   | policy | SecurityPolicy URI | 備考 |
   |---|---|---|
@@ -501,9 +501,11 @@ pki      = "pki/ua-a"                          # 省略: 実行ファイルの�
   | `basic256` | Basic256 | 非推奨 (同上) |
   | `basic256sha256` | Basic256Sha256 | `sign` / `sign-encrypt` の略記はこれ |
   | `aes128-sha256-rsaoaep` | Aes128_Sha256_RsaOaep | |
-  | `aes256-sha256-rsapss` | Aes256_Sha256_RsaPss | 推奨 (最も強い) |
+  | `aes256-sha256-rsapss` | Aes256_Sha256_RsaPss | 推奨 |
+  | `rsa-dh-aesgcm` | RSA_DH_AesGcm | OPC UA 1.05 (フェーズ 18)。一時 DH 鍵交換 + AES-GCM |
+  | `rsa-dh-chachapoly` | RSA_DH_ChaChaPoly | OPC UA 1.05 (フェーズ 18)。一時 DH 鍵交換 + ChaCha20-Poly1305 |
 
-  1 つ以上、重複不可 (`sign` と `basic256sha256:sign` は同じ値で重複扱い)。`none` を含めなければ平文の接続はできない。どのポリシーも同じ RSA 2048 の自己署名証明書を使う。ECC 系ポリシー (ECC_nistP256 等) は ECC 証明書を別途持つ必要があり未対応
+  1 つ以上、重複不可 (`sign` と `basic256sha256:sign` は同じ値で重複扱い)。`none` を含めなければ平文の接続はできない。どのポリシーも同じ RSA 2048 の自己署名証明書を使う (RSA_DH 系も証明書は RSA で、追加の証明書は作られない)。ECC 系ポリシー (ECC_nistP256 等) は ECC 証明書を別途持つ必要があり未対応。RSA_DH 系は 1.05 対応クライアント (OPC Foundation .NET SDK 2.0 等) でのみ接続できる
 - サーバ証明書は自己署名を `<pki>/own` に自動生成する (CN=moz-<name>)。クライアント側は通常「信頼する」操作が必要 (UAExpert 等)
 - `accept_untrusted = false` のとき、`<pki>/trusted/certs` に無いクライアント証明書は `BadSecurityChecksFailed` で拒否され、その証明書は `<pki>/rejected/certs` に保存される。そのファイルを `trusted/certs` へ移せば次の接続から受け付ける (再起動不要)。`none` エンドポイントではクライアント証明書を検証しない
 - 発行者 (CA) チェーンは `<pki>/issuer/certs`。CRL、証明書の有効期限ポリシー、GDS は未対応

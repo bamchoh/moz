@@ -11,7 +11,12 @@ public enum OpcUaAccess
     Write,
 }
 
-/// <summary>The RSA security policies moz offers / connects with (ECC policies need ECC certificates and are not offered).</summary>
+/// <summary>
+/// The RSA security policies moz offers / connects with, including the OPC UA
+/// 1.05 RSA_DH ones (ephemeral DH key agreement with AES-GCM / ChaCha20-Poly1305;
+/// still the RSA application certificate). ECC policies need ECC certificates
+/// and are not offered.
+/// </summary>
 public enum OpcUaPolicy
 {
     None,
@@ -20,6 +25,8 @@ public enum OpcUaPolicy
     Basic256Sha256,
     Aes128Sha256RsaOaep,
     Aes256Sha256RsaPss,
+    RsaDhAesGcm,
+    RsaDhChaChaPoly,
 }
 
 /// <summary>
@@ -27,7 +34,7 @@ public enum OpcUaPolicy
 /// Config spelling: "none", "sign" / "sign-encrypt" (Basic256Sha256), or
 /// "&lt;policy&gt;:sign" / "&lt;policy&gt;:sign-encrypt" with policy =
 /// basic128rsa15 | basic256 | basic256sha256 | aes128-sha256-rsaoaep |
-/// aes256-sha256-rsapss.
+/// aes256-sha256-rsapss | rsa-dh-aesgcm | rsa-dh-chachapoly.
 /// </summary>
 public readonly record struct OpcUaSecurity(OpcUaPolicy Policy, MessageSecurityMode Mode)
 {
@@ -36,7 +43,7 @@ public readonly record struct OpcUaSecurity(OpcUaPolicy Policy, MessageSecurityM
     public static OpcUaSecurity SignAndEncrypt => new(OpcUaPolicy.Basic256Sha256, MessageSecurityMode.SignAndEncrypt);
 
     /// <summary>The accepted spellings, for error messages.</summary>
-    public const string Spellings = "none|sign|sign-encrypt|<policy>:sign|<policy>:sign-encrypt; policy = basic128rsa15|basic256|basic256sha256|aes128-sha256-rsaoaep|aes256-sha256-rsapss";
+    public const string Spellings = "none|sign|sign-encrypt|<policy>:sign|<policy>:sign-encrypt; policy = basic128rsa15|basic256|basic256sha256|aes128-sha256-rsaoaep|aes256-sha256-rsapss|rsa-dh-aesgcm|rsa-dh-chachapoly";
 
     private static readonly (string Name, OpcUaPolicy Policy, string Uri)[] Policies =
     [
@@ -45,6 +52,8 @@ public readonly record struct OpcUaSecurity(OpcUaPolicy Policy, MessageSecurityM
         ("basic256sha256", OpcUaPolicy.Basic256Sha256, SecurityPolicies.Basic256Sha256),
         ("aes128-sha256-rsaoaep", OpcUaPolicy.Aes128Sha256RsaOaep, SecurityPolicies.Aes128_Sha256_RsaOaep),
         ("aes256-sha256-rsapss", OpcUaPolicy.Aes256Sha256RsaPss, SecurityPolicies.Aes256_Sha256_RsaPss),
+        ("rsa-dh-aesgcm", OpcUaPolicy.RsaDhAesGcm, SecurityPolicies.RSA_DH_AesGcm),
+        ("rsa-dh-chachapoly", OpcUaPolicy.RsaDhChaChaPoly, SecurityPolicies.RSA_DH_ChaChaPoly),
     ];
 
     /// <summary>Config spelling to a flavour; null for anything else (case-insensitive).</summary>

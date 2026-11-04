@@ -166,6 +166,8 @@ public class OpcUaSecurityTests
     [InlineData("basic256:sign-encrypt", OpcUaPolicy.Basic256, MessageSecurityMode.SignAndEncrypt)]
     [InlineData("basic128rsa15:sign", OpcUaPolicy.Basic128Rsa15, MessageSecurityMode.Sign)]
     [InlineData("AES256-SHA256-RSAPSS:SIGN", OpcUaPolicy.Aes256Sha256RsaPss, MessageSecurityMode.Sign)]
+    [InlineData("rsa-dh-aesgcm:sign-encrypt", OpcUaPolicy.RsaDhAesGcm, MessageSecurityMode.SignAndEncrypt)]
+    [InlineData("rsa-dh-chachapoly:sign", OpcUaPolicy.RsaDhChaChaPoly, MessageSecurityMode.Sign)]
     public void Security_Parses(string text, OpcUaPolicy policy, MessageSecurityMode mode)
     {
         var parsed = OpcUaSecurity.Parse(text);
@@ -180,6 +182,7 @@ public class OpcUaSecurityTests
     [InlineData("sign:aes256-sha256-rsapss")]
     [InlineData("basic256sha256:encrypt")]
     [InlineData("ecc-nistp256:sign")]      // ECC needs ECC certificates: not offered
+    [InlineData("rsa-dh-aesgcm")]          // mode missing
     [InlineData("")]
     public void Security_RejectsUnknown(string text)
     {
@@ -194,6 +197,74 @@ public class OpcUaSecurityTests
         Assert.Equal((SecurityPolicies.Basic256, MessageSecurityMode.Sign), OpcUaSecurity.Parse("basic256:sign")!.Value.ToSdk());
         Assert.Equal((SecurityPolicies.Basic128Rsa15, MessageSecurityMode.SignAndEncrypt), OpcUaSecurity.Parse("basic128rsa15:sign-encrypt")!.Value.ToSdk());
         Assert.Equal((SecurityPolicies.None, MessageSecurityMode.None), OpcUaSecurity.None.ToSdk());
+        Assert.Equal((SecurityPolicies.RSA_DH_AesGcm, MessageSecurityMode.SignAndEncrypt), OpcUaSecurity.Parse("rsa-dh-aesgcm:sign-encrypt")!.Value.ToSdk());
+        Assert.Equal((SecurityPolicies.RSA_DH_ChaChaPoly, MessageSecurityMode.Sign), OpcUaSecurity.Parse("rsa-dh-chachapoly:sign")!.Value.ToSdk());
+    }
+
+    private static readonly OpcUaServerOptions Ua105Policies = OpcUaServerOptions.Default with
+    {
+        Security =
+        [
+            OpcUaSecurity.Parse("rsa-dh-aesgcm:sign-encrypt")!.Value,
+            OpcUaSecurity.Parse("rsa-dh-aesgcm:sign")!.Value,
+            OpcUaSecurity.Parse("rsa-dh-chachapoly:sign-encrypt")!.Value,
+            OpcUaSecurity.Parse("rsa-dh-chachapoly:sign")!.Value,
+        ],
+    };
+
+    [Fact]
+    public async Task Server_AdvertisesUa105Policies_WithOneRsaCertificate()
+    {
+        await using var server = await StartAsync(Ua105Policies);
+        var endpoints = await UaTestClient.EndpointsAsync(server.Endpoint);
+        Assert.Contains((SecurityPolicies.RSA_DH_AesGcm, MessageSecurityMode.SignAndEncrypt), endpoints);
+        Assert.Contains((SecurityPolicies.RSA_DH_AesGcm, MessageSecurityMode.Sign), endpoints);
+        Assert.Contains((SecurityPolicies.RSA_DH_ChaChaPoly, MessageSecurityMode.SignAndEncrypt), endpoints);
+        Assert.Contains((SecurityPolicies.RSA_DH_ChaChaPoly, MessageSecurityMode.Sign), endpoints);
+        Assert.Equal(4, endpoints.Count);
+        // the same RSA application certificate serves the 1.05 policies: nothing extra is generated
+        Assert.Single(Directory.GetFiles(Path.Combine(server.Pki, "own", "certs"), "*.der"));
+    }
+
+    [Theory]
+    [InlineData(SecurityPolicies.RSA_DH_AesGcm, MessageSecurityMode.SignAndEncrypt)]
+    [InlineData(SecurityPolicies.RSA_DH_AesGcm, MessageSecurityMode.Sign)]
+    [InlineData(SecurityPolicies.RSA_DH_ChaChaPoly, MessageSecurityMode.SignAndEncrypt)]
+    [InlineData(SecurityPolicies.RSA_DH_ChaChaPoly, MessageSecurityMode.Sign)]
+    public async Task Ua105Policy_Session_ReadsAndWrites(string policy, MessageSecurityMode mode)
+    {
+        await using var server = await StartAsync(Ua105Policies);
+        using var session = await UaTestClient.ConnectAsync(server.Endpoint, null, policy, mode);
+        var ns = await UaTestClient.MozNamespaceAsync(session);
+        Assert.True(StatusCode.IsGood(await UaTestClient.WriteAsync(session, new NodeId("temp", ns), new Variant(7.5f))));
+        Assert.Equal(7.5f, server.Variables.Read<float>("temp"));
+        var read = await UaTestClient.ReadAsync(session, new NodeId("temp", ns));
+        Assert.True(read.WrappedValue.TryGetValue(out float f) && f == 7.5f);
+    }
+
+    [Theory]
+    [InlineData("rsa-dh-aesgcm:sign-encrypt")]
+    [InlineData("rsa-dh-chachapoly:sign")]
+    public async Task MozClient_Ua105Policy_Polls(string security)
+    {
+        await using var server = await StartAsync(Ua105Policies);
+        server.Variables.Write("temp", 43.0f);
+        var local = new Device("local", holdingRegisters: 32);
+        var mirror = new Variable("mirror", TableKind.HoldingRegister, 0, VariableType.Real);
+        var vars = new VariableTable(local, [mirror], NullLogger.Instance);
+        var provider = new CapturingProvider();
+        var remote = new OpcUaRemote("ua105", server.Endpoint, 5000,
+            [new OpcUaEntry(ExpandedNodeId.Parse("nsu=urn:moz:ua:ns;s=temp"), mirror)], [], provider.CreateLogger("ua"),
+            new OpcUaClientOptions(OpcUaSecurity.Parse(security)!.Value));
+        var poller = new ClientPoller("ua", remote, 200, local, provider.CreateLogger("ua"));
+
+        using var cts = new CancellationTokenSource();
+        var task = poller.RunAsync(cts.Token);
+        await Task.Delay(4000);
+        Assert.True(poller.IsConnected, string.Join("; ", provider.Entries.Select(e => e.Message)));
+        await cts.CancelAsync();
+        await task;
+        Assert.Equal(43.0f, vars.Read<float>("mirror"));
     }
 
     private static readonly OpcUaServerOptions ManyPolicies = OpcUaServerOptions.Default with
