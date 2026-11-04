@@ -101,12 +101,12 @@ public class CliTests : IDisposable
             """
             [[device]]
             name = "mirror"
-            holding = 100
+            words = 100
 
             [[variable]]
             name = "temperature"
             device = "mirror"
-            kind = "holding"
+            kind = "words"
             offset = 0
             type = "real"
 
@@ -140,7 +140,7 @@ public class CliTests : IDisposable
 
             [[server.map]]
             device = "W"
-            kind = "holding"
+            kind = "words"
             offset = 10000
             """;
         var exit = await Moz.Cli.CliApp.Run(["validate", WriteFile("mc-server.toml", toml)]);
@@ -164,7 +164,7 @@ public class CliTests : IDisposable
 
             [[server.map]]
             device = "CIO"
-            kind = "holding"
+            kind = "words"
             offset = 10000
             count = 100
 
@@ -185,8 +185,8 @@ public class CliTests : IDisposable
             """
             [[device]]
             name = "mirror"
-            coils = 100
-            holding = 100
+            bits = 100
+            words = 100
 
             [[client]]
             name = "mc-master"
@@ -215,7 +215,7 @@ public class CliTests : IDisposable
             """
             [[device]]
             name = "mirror"
-            holding = 100
+            words = 100
 
             [[client]]
             name = "rtu-master"
@@ -241,13 +241,13 @@ public class CliTests : IDisposable
             """
             [[device]]
             name = "plc1"
-            holding = 100
-            input = 100
+            words = 100
+            read_only_words = 100
 
             [[variable]]
             name = "setpoint"
             device = "plc1"
-            kind = "input"
+            kind = "read_only_words"
             offset = 0
             type = "real"
             value = 20.5
@@ -269,7 +269,7 @@ public class CliTests : IDisposable
             """
             [[device]]
             name = "plc1"
-            holding = 100
+            words = 100
 
             [[struct]]
             name = "Motor"
@@ -283,7 +283,7 @@ public class CliTests : IDisposable
             [[variable]]
             name = "motor"
             device = "plc1"
-            kind = "holding"
+            kind = "words"
             offset = 0
             type = "Motor"
             count = 2

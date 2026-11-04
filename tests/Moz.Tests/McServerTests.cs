@@ -16,7 +16,7 @@ public class McServerTests
 {
     private const string Header = "500000FFFF03000C00"; // request header, data length 12 (no write data)
 
-    private static Device NewDevice() => new("plc", coils: 256, discreteInputs: 256, holdingRegisters: 256, inputRegisters: 256);
+    private static Device NewDevice() => new("plc", bits: 256, readOnlyBits: 256, words: 256, readOnlyWords: 256);
 
     private static McOutcome Handle(Device device, string requestHex, IReadOnlyList<McMap>? maps = null)
     {
@@ -32,7 +32,7 @@ public class McServerTests
     public void Read_Words_FromDefaultMap()
     {
         var device = NewDevice();
-        device.Seed(TableKind.HoldingRegister, 100, new ushort[] { 0x1234, 0x0002, 0xFFFF });
+        device.Seed(TableKind.Words, 100, new ushort[] { 0x1234, 0x0002, 0xFFFF });
         var o = Handle(device, Header + "100001040000640000A80300");
         Assert.Equal("D00000FFFF030008000000" + "34120200FFFF", Convert.ToHexString(o.Response));
         Assert.Equal(("read", "D100", 3, 0), (o.Op, o.Target, o.Points, (int)o.EndCode));
@@ -42,7 +42,7 @@ public class McServerTests
     public void Read_Bits_FromDefaultMap()
     {
         var device = NewDevice();
-        device.Seed(TableKind.Coil, 100, new[] { true, false, false, true, true });
+        device.Seed(TableKind.Bits, 100, new[] { true, false, false, true, true });
         var o = Handle(device, Header + "100001040100640000900500");
         Assert.Equal("D00000FFFF030005000000" + "100110", Convert.ToHexString(o.Response));
         Assert.Equal(("read", "M100", 5), (o.Op, o.Target, o.Points));
@@ -56,13 +56,13 @@ public class McServerTests
         Assert.Equal("D00000FFFF030002000000", Convert.ToHexString(o.Response));
         Assert.Equal(("write", "D100", 2, 0), (o.Op, o.Target, o.Points, (int)o.EndCode));
         var w = new ushort[2];
-        device.Read(TableKind.HoldingRegister, 100, w);
+        device.Read(TableKind.Words, 100, w);
         Assert.Equal([0x1234, 0x5678], w);
 
         o = Handle(device, "500000FFFF0300" + "0F00" + "100001140100640000900500" + "100110");
         Assert.Equal(0, o.EndCode);
         var b = new bool[6];
-        device.Read(TableKind.Coil, 100, b);
+        device.Read(TableKind.Bits, 100, b);
         Assert.Equal([true, false, false, true, true, false], b);
     }
 
@@ -104,10 +104,10 @@ public class McServerTests
     [Fact]
     public void Write_ToReadOnlyTable_IsRejected_C05C()
     {
-        var device = NewDevice(); // X → discrete inputs (read-only for peers)
+        var device = NewDevice(); // X → read_only_bits inputs (read-only for peers)
         var o = Handle(device, "500000FFFF0300" + "0D00" + "100001140100" + "0A0000" + "9C" + "0100" + "10");
         Assert.Equal(0xC05C, o.EndCode);
-        Assert.False(device.ReadBit(TableKind.DiscreteInput, 0x0A));
+        Assert.False(device.ReadBit(TableKind.ReadOnlyBits, 0x0A));
     }
 
     [Fact]
@@ -116,18 +116,18 @@ public class McServerTests
         var device = NewDevice();
         var maps = McMap.Merge(device,
         [
-            new McMap(Code("W"), TableKind.InputRegister, 10, 20),    // W0..W19 → input 10..29 (read-only)
-            new McMap(Code("D"), TableKind.HoldingRegister, 100, 50), // D0 → holding 100
+            new McMap(Code("W"), TableKind.ReadOnlyWords, 10, 20),    // W0..W19 → read_only_words 10..29 (read-only)
+            new McMap(Code("D"), TableKind.Words, 100, 50), // D0 → words 100
         ]);
         Assert.Contains(maps, m => m.Device.Code == "M");             // defaults kept
         Assert.Contains(maps, m => m.Device.Code == "X");
         Assert.Single(maps, m => m.Device.Code == "D");
-        device.Seed(TableKind.InputRegister, 11, new ushort[] { 0xBEEF });
-        device.Seed(TableKind.HoldingRegister, 100, new ushort[] { 0xCAFE });
+        device.Seed(TableKind.ReadOnlyWords, 11, new ushort[] { 0xBEEF });
+        device.Seed(TableKind.Words, 100, new ushort[] { 0xCAFE });
 
         var o = Handle(device, Header + "100001040000010000B40100", maps);        // W1
         Assert.Equal("D00000FFFF030004000000EFBE", Convert.ToHexString(o.Response));
-        o = Handle(device, Header + "100001040000000000A80100", maps);            // D0 → holding 100
+        o = Handle(device, Header + "100001040000000000A80100", maps);            // D0 → words 100
         Assert.Equal("D00000FFFF030004000000FECA", Convert.ToHexString(o.Response));
         o = Handle(device, Header + "100001040000320000A80100", maps);            // D50: beyond count 50
         Assert.Equal(0xC056, o.EndCode);
@@ -147,7 +147,7 @@ public class McServerTests
     public async Task Server_ServesMozMaster_PollAndPush()
     {
         var plc = NewDevice();
-        plc.Seed(TableKind.HoldingRegister, 0, new ushort[] { 0x1111, 0x2222 });
+        plc.Seed(TableKind.Words, 0, new ushort[] { 0x1111, 0x2222 });
         var provider = new CapturingProvider();
         var server = new McServer("mc-srv", new IPEndPoint(IPAddress.Loopback, 0), plc, McMap.Defaults(plc), provider.CreateLogger("srv"));
         using var cts = new CancellationTokenSource();
@@ -157,23 +157,23 @@ public class McServerTests
             await Task.Delay(10);
         }
 
-        var local = new Device("local", coils: 32, holdingRegisters: 32);
-        McEntry[] polls = [Entry("D0", 2, TableKind.HoldingRegister, 0), Entry("X5", 3, TableKind.Coil, 0)];
-        McEntry[] pushes = [Entry("M10", 3, TableKind.Coil, 8)];
+        var local = new Device("local", bits: 32, words: 32);
+        McEntry[] polls = [Entry("D0", 2, TableKind.Words, 0), Entry("X5", 3, TableKind.Bits, 0)];
+        McEntry[] pushes = [Entry("M10", 3, TableKind.Bits, 8)];
         var remote = new McRemote("mc", server.BoundEndpoint, 2000, new Mc3EOptions(), polls, pushes, NullLogger.Instance);
         var poller = new ClientPoller("mc", remote, 50, local, NullLogger.Instance);
         var pollerTask = poller.RunAsync(cts.Token);
         await Task.Delay(100);
-        local.Write(TableKind.Coil, 8, new[] { true, false, true });
+        local.Write(TableKind.Bits, 8, new[] { true, false, true });
         await Task.Delay(300);
         Assert.False(poller.HasPendingPush);
 
         var w = new ushort[2];
-        local.Read(TableKind.HoldingRegister, 0, w);
+        local.Read(TableKind.Words, 0, w);
         Assert.Equal([0x1111, 0x2222], w);
-        Assert.True(plc.ReadBit(TableKind.Coil, 10));
-        Assert.False(plc.ReadBit(TableKind.Coil, 11));
-        Assert.True(plc.ReadBit(TableKind.Coil, 12));
+        Assert.True(plc.ReadBit(TableKind.Bits, 10));
+        Assert.False(plc.ReadBit(TableKind.Bits, 11));
+        Assert.True(plc.ReadBit(TableKind.Bits, 12));
         Assert.Contains(provider.Entries, e => e.EventId == Moz.Logging.CommLog.EventIds.Request.Id
             && e.Message.Contains("op=read") && e.Message.Contains("target=D0") && e.Message.Contains("qty=2") && e.Message.Contains("result=ok"));
         Assert.Contains(provider.Entries, e => e.EventId == Moz.Logging.CommLog.EventIds.Request.Id

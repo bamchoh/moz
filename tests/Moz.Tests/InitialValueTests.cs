@@ -26,10 +26,10 @@ public class InitialValueTests
         ["Drive"] = new StructDef("Drive", [new StructField("motor", "Motor"), new StructField("id", "uint")]),
     };
 
-    private static IReadOnlyList<Variable> Leaves(string type, int count = 1, int length = 0, TableKind table = TableKind.HoldingRegister, int offset = 0) =>
+    private static IReadOnlyList<Variable> Leaves(string type, int count = 1, int length = 0, TableKind table = TableKind.Words, int offset = 0) =>
         VariableLayout.Expand("v", table, offset, type, count, length, Structs);
 
-    private static object[] Single(string type, object value, int length = 0, TableKind table = TableKind.HoldingRegister)
+    private static object[] Single(string type, object value, int length = 0, TableKind table = TableKind.Words)
     {
         var resolved = InitialValues.Resolve("v", 1, value, Leaves(type, 1, length, table));
         var (leaf, values) = Assert.Single(resolved);
@@ -58,7 +58,7 @@ public class InitialValueTests
     [InlineData("dt", 1793491200L, 1793491200ul)]
     public void Scalar_Converts_ToHostType(string type, object toml, object host)
     {
-        var values = Single(type, toml, table: type == "bool" ? TableKind.Coil : TableKind.HoldingRegister);
+        var values = Single(type, toml, table: type == "bool" ? TableKind.Bits : TableKind.Words);
         Assert.Equal(host, Assert.Single(values));
     }
 
@@ -94,7 +94,7 @@ public class InitialValueTests
     public void Scalar_WrongTypeOrRange_Throws(string type, object toml, string why)
     {
         var ex = Assert.Throws<FormatException>(() => Single(type, toml, length: type == "string" ? 4 : 0,
-            table: type == "bool" ? TableKind.Coil : TableKind.HoldingRegister));
+            table: type == "bool" ? TableKind.Bits : TableKind.Words));
         Assert.Contains(why, ex.Message);
         Assert.StartsWith("value expects", ex.Message);
     }
@@ -185,26 +185,26 @@ public class InitialValueTests
     [Fact]
     public void Apply_SeedsAnyTable_WithoutNotifying()
     {
-        var device = new Device("d", coils: 16, discreteInputs: 16, holdingRegisters: 64, inputRegisters: 64);
+        var device = new Device("d", bits: 16, readOnlyBits: 16, words: 64, readOnlyWords: 64);
         int notified = 0;
-        using var w = device.Watch(TableKind.InputRegister, 0, 64, _ => notified++);
-        using var w2 = device.Watch(TableKind.DiscreteInput, 0, 16, _ => notified++);
+        using var w = device.Watch(TableKind.ReadOnlyWords, 0, 64, _ => notified++);
+        using var w2 = device.Watch(TableKind.ReadOnlyBits, 0, 16, _ => notified++);
 
         static IReadOnlyList<Variable> Decl(string name, TableKind table, int offset, string type, int count = 1, int length = 0) =>
             VariableLayout.Expand(name, table, offset, type, count, length, Structs);
-        InitialValues.Apply(device, InitialValues.Resolve("t", 1, 20.5, Decl("t", TableKind.InputRegister, 2, "real")));
-        InitialValues.Apply(device, InitialValues.Resolve("s", 1, "hi", Decl("s", TableKind.InputRegister, 10, "string", length: 4)));
-        InitialValues.Apply(device, InitialValues.Resolve("b", 3, new TomlArray { true, false, true }, Decl("b", TableKind.DiscreteInput, 1, "bool", count: 3)));
+        InitialValues.Apply(device, InitialValues.Resolve("t", 1, 20.5, Decl("t", TableKind.ReadOnlyWords, 2, "real")));
+        InitialValues.Apply(device, InitialValues.Resolve("s", 1, "hi", Decl("s", TableKind.ReadOnlyWords, 10, "string", length: 4)));
+        InitialValues.Apply(device, InitialValues.Resolve("b", 3, new TomlArray { true, false, true }, Decl("b", TableKind.ReadOnlyBits, 1, "bool", count: 3)));
         InitialValues.Apply(device, InitialValues.Resolve("m", 1, new TomlTable { ["speed"] = -1L, ["on"] = true },
-            Decl("m", TableKind.HoldingRegister, 20, "Motor")));
+            Decl("m", TableKind.Words, 20, "Motor")));
 
         var vars = new VariableTable(device,
         [
-            new Variable("t", TableKind.InputRegister, 2, VariableType.Real),
-            new Variable("s", TableKind.InputRegister, 10, VariableType.String, Length: 4),
-            new Variable("b", TableKind.DiscreteInput, 1, VariableType.Bool, Count: 3),
-            new Variable("m.speed", TableKind.HoldingRegister, 20, VariableType.Int),
-            new Variable("m.on", TableKind.HoldingRegister, 21, VariableType.BoolWord),
+            new Variable("t", TableKind.ReadOnlyWords, 2, VariableType.Real),
+            new Variable("s", TableKind.ReadOnlyWords, 10, VariableType.String, Length: 4),
+            new Variable("b", TableKind.ReadOnlyBits, 1, VariableType.Bool, Count: 3),
+            new Variable("m.speed", TableKind.Words, 20, VariableType.Int),
+            new Variable("m.on", TableKind.Words, 21, VariableType.BoolWord),
         ], Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
         Assert.Equal(20.5f, vars.Read<float>("t"));
         Assert.Equal("hi", vars.Read<string>("s"));

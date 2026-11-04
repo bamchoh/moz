@@ -23,7 +23,7 @@ karakuri（先代ツール）の反省を設計指針にしています:
 │  ├─ Modbus.ModbusPdu ── コーデック層 (純関数)     │
 │  │    Handle(pdu, device) → 応答 pdu             │
 │  └─ Devices.IDeviceAccess ── 記憶装置 seam       │
-│       coil / discrete / holding / input の 4 領域│
+│       bits / read_only_bits / words / read_only_words の 4 領域│
 │       + 変更通知 Watch                            │
 └─────────────────────────────────────────────────┘
 ```
@@ -84,4 +84,5 @@ karakuri（先代ツール）の反省を設計指針にしています:
 16. OPC UA セキュア通信 (`server.security` = none / sign / sign-encrypt (Basic256Sha256)、`accept_untrusted` + `pki` の信頼リスト; クライアント側も `security` / `user` / `password` / `accept_untrusted` / `pki`) ← **完了**
 17. OPC UA の RSA 系ポリシー全種 (`<policy>:sign|sign-encrypt`: basic128rsa15 / basic256 / basic256sha256 / aes128-sha256-rsaoaep / aes256-sha256-rsapss; ECC は未対応) ← **完了**
 18. OPC UA 1.05 の RSA_DH ポリシー (`rsa-dh-aesgcm` / `rsa-dh-chachapoly`; 同じ RSA 証明書で動く。ECC 系は要望により対象外) ← **完了**
-19. オムロン FINS サーバ (`[[server]] protocol = "fins-tcp" | "fins-udp"`; `FinsServer` 純粋ハンドラ (0101 / 0102 / 0104) + TCP (ノード交換) / UDP ランナー、全エリアをワードテーブルへ写す `[[server.map]]`、既定 DM → holding) ← **完了**。次は Keyence KV ホストリンク、Siemens S7 の順
+19. オムロン FINS サーバ (`[[server]] protocol = "fins-tcp" | "fins-udp"`; `FinsServer` 純粋ハンドラ (0101 / 0102 / 0104) + TCP (ノード交換) / UDP ランナー、全エリアをワードテーブルへ写す `[[server.map]]`、既定 DM → words) ← **完了**
+20. メモリモデルの中立な命名 (`TableKind` = Bits / ReadOnlyBits / Words / ReadOnlyWords、設定キー `bits` / `read_only_bits` / `words` / `read_only_words`、`kind` / `local_kind` / `server.map.kind` の値も同じ、スクリプトの area は `bits` / `readOnlyBits` / `words` / `readOnlyWords`。Modbus 由来の coil / discrete / holding / input は設定でもコードでも廃止。互換なし) ← **完了**。次は Keyence KV ホストリンク、Siemens S7 の順

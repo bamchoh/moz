@@ -99,7 +99,7 @@ public class RunnerHostTests
     [Fact]
     public async Task TcpServers_ReportReady_OnceListening()
     {
-        var device = new Device("d", holdingRegisters: 8, coils: 8);
+        var device = new Device("d", words: 8, bits: 8);
         var modbus = new ModbusTcpServer("m", new IPEndPoint(IPAddress.Loopback, 0), device, null, NullLogger.Instance);
         var mc = new McServer("mc", new IPEndPoint(IPAddress.Loopback, 0), device, McMap.Defaults(device), NullLogger.Instance);
         using var cts = new CancellationTokenSource();
@@ -117,7 +117,7 @@ public class RunnerHostTests
     [Fact]
     public async Task TcpServer_ListenFailure_FaultsReady()
     {
-        var device = new Device("d", holdingRegisters: 8);
+        var device = new Device("d", words: 8);
         var first = new ModbusTcpServer("m1", new IPEndPoint(IPAddress.Loopback, 0), device, null, NullLogger.Instance);
         using var cts = new CancellationTokenSource();
         var t1 = first.RunAsync(cts.Token);

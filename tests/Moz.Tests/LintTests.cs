@@ -11,10 +11,10 @@ namespace Moz.Tests;
 /// </summary>
 public class LintTests
 {
-    private readonly Device _device = new("t", holdingRegisters: 100);
+    private readonly Device _device = new("t", words: 100);
 
     private static Variable V(string name, int offset, VariableType type) =>
-        new(name, TableKind.HoldingRegister, offset, type, 1);
+        new(name, TableKind.Words, offset, type, 1);
 
     [Fact]
     public void WordSize_Is4()
@@ -32,7 +32,7 @@ public class LintTests
 
         table.Write("offset32", long.MaxValue);
         var w = new ushort[4];
-        _device.Read(TableKind.HoldingRegister, 0, w);
+        _device.Read(TableKind.Words, 0, w);
         Assert.Equal((ushort)0x7FFF, w[0]); // big-endian: high word first
         Assert.Equal((ushort)0xFFFF, w[1]);
         Assert.Equal((ushort)0xFFFF, w[2]);
@@ -46,7 +46,7 @@ public class LintTests
         var table = new VariableTable(_device, [V("serial", 4, VariableType.Ulint)], NullLogger.Instance);
         table.Write("serial", ulong.MaxValue);
         var w = new ushort[4];
-        _device.Read(TableKind.HoldingRegister, 4, w);
+        _device.Read(TableKind.Words, 4, w);
         Assert.Equal((ushort)0xFFFF, w[0]);
         Assert.Equal((ushort)0xFFFF, w[3]);
         Assert.Equal(ulong.MaxValue, table.Read<ulong>("serial"));

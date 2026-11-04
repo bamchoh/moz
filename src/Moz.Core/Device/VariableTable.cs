@@ -32,7 +32,7 @@ public sealed class VariableTable
             if (Variable.KindOf(v.Type) != TableKindToTypeKind(v.Table))
             {
                 throw new ArgumentException(
-                    $"variable \"{v.Name}\": type {v.Type} requires a {(Variable.KindOf(v.Type) == VariableTypeKind.Bit ? "bit (coil/discrete)" : "word (holding/input)")} table");
+                    $"variable \"{v.Name}\": type {v.Type} requires a {(Variable.KindOf(v.Type) == VariableTypeKind.Bit ? "bit (bits/read_only_bits)" : "word (words/read_only_words)")} table");
             }
             if (v.Type == VariableType.String && (v.Length < 1 || v.Length > Variable.MaxStringLength))
             {

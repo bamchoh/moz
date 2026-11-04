@@ -7,20 +7,20 @@ namespace Moz.Devices;
 public sealed class Device : IDeviceAccess
 {
     private readonly Lock _sync = new();
-    private readonly bool[] _coils;
-    private readonly bool[] _discretes;
-    private readonly ushort[] _holding;
-    private readonly ushort[] _inputs;
+    private readonly bool[] _bits;
+    private readonly bool[] _readOnlyBits;
+    private readonly ushort[] _words;
+    private readonly ushort[] _readOnlyWords;
     private readonly List<Watcher> _watchers = [];
 
-    public Device(string name, int coils = 65536, int discreteInputs = 65536,
-                  int holdingRegisters = 65536, int inputRegisters = 65536)
+    public Device(string name, int bits = 65536, int readOnlyBits = 65536,
+                  int words = 65536, int readOnlyWords = 65536)
     {
         Name = name;
-        _coils = new bool[coils];
-        _discretes = new bool[discreteInputs];
-        _holding = new ushort[holdingRegisters];
-        _inputs = new ushort[inputRegisters];
+        _bits = new bool[bits];
+        _readOnlyBits = new bool[readOnlyBits];
+        _words = new ushort[words];
+        _readOnlyWords = new ushort[readOnlyWords];
     }
 
     public string Name { get; }
@@ -28,10 +28,10 @@ public sealed class Device : IDeviceAccess
     public int Length(TableKind table) =>
         table switch
         {
-            TableKind.Coil => _coils.Length,
-            TableKind.DiscreteInput => _discretes.Length,
-            TableKind.HoldingRegister => _holding.Length,
-            TableKind.InputRegister => _inputs.Length,
+            TableKind.Bits => _bits.Length,
+            TableKind.ReadOnlyBits => _readOnlyBits.Length,
+            TableKind.Words => _words.Length,
+            TableKind.ReadOnlyWords => _readOnlyWords.Length,
             _ => throw new ArgumentOutOfRangeException(nameof(table), table, null),
         };
 
@@ -97,7 +97,7 @@ public sealed class Device : IDeviceAccess
     }
 
     /// <summary>
-    /// Seed read-only tables (DiscreteInput/InputRegister) and preset any
+    /// Seed read-only tables (ReadOnlyBits/ReadOnlyWords) and preset any
     /// table from the owning process: config seeding today, tests, and a
     /// future CLI/GUI "set value" feature. Intentionally NOT part of
     /// <see cref="IDeviceAccess"/> — external consumers must use the seam.
@@ -122,7 +122,7 @@ public sealed class Device : IDeviceAccess
 
     /// <summary>
     /// Owner-side write into ANY table, including the read-only ones, with
-    /// watcher notification: the client mirror lands remote discrete/input
+    /// watcher notification: the client mirror lands remote read_only_bits/read_only_words
     /// values here. Like <see cref="Seed"/> it bypasses the read-only rule
     /// (which exists for Modbus masters, not for the process that owns the
     /// simulated memory); unlike Seed it dispatches a DeviceChange.
@@ -138,16 +138,16 @@ public sealed class Device : IDeviceAccess
     private bool[] Bits(TableKind table) =>
         table switch
         {
-            TableKind.Coil => _coils,
-            TableKind.DiscreteInput => _discretes,
+            TableKind.Bits => _bits,
+            TableKind.ReadOnlyBits => _readOnlyBits,
             _ => throw new ArgumentOutOfRangeException(nameof(table), table, "not a bit table"),
         };
 
     private ushort[] Words(TableKind table) =>
         table switch
         {
-            TableKind.HoldingRegister => _holding,
-            TableKind.InputRegister => _inputs,
+            TableKind.Words => _words,
+            TableKind.ReadOnlyWords => _readOnlyWords,
             _ => throw new ArgumentOutOfRangeException(nameof(table), table, "not a word table"),
         };
 
@@ -166,33 +166,33 @@ public sealed class Device : IDeviceAccess
 
     private void EnsureWritableBit(TableKind table)
     {
-        if (table == TableKind.Coil)
+        if (table == TableKind.Bits)
         {
             return;
         }
-        ThrowNotWritable(table, TableKind.Coil);
+        ThrowNotWritable(table, TableKind.Bits);
     }
 
     private void EnsureWritableWord(TableKind table)
     {
-        if (table == TableKind.HoldingRegister)
+        if (table == TableKind.Words)
         {
             return;
         }
-        ThrowNotWritable(table, TableKind.HoldingRegister);
+        ThrowNotWritable(table, TableKind.Words);
     }
 
     private static void ThrowNotWritable(TableKind table, TableKind writableKind)
     {
-        if (table is TableKind.DiscreteInput or TableKind.InputRegister)
+        if (table is TableKind.ReadOnlyBits or TableKind.ReadOnlyWords)
         {
             throw new InvalidOperationException(
                 $"{table} is read-only. This is a programming bug: the Modbus PDU layer must map this to exception 02 before reaching the device.");
         }
-        if (table is TableKind.Coil or TableKind.HoldingRegister)
+        if (table is TableKind.Bits or TableKind.Words)
         {
             throw new InvalidOperationException(
-                $"table kind mismatch: {table} requires the {(table == TableKind.Coil ? "bit" : "word")} Write; expected writes go to {writableKind}");
+                $"table kind mismatch: {table} requires the {(table == TableKind.Bits ? "bit" : "word")} Write; expected writes go to {writableKind}");
         }
         throw new ArgumentOutOfRangeException(nameof(table), table, null);
     }

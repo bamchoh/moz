@@ -27,13 +27,13 @@ public class McRemoteTests
     [Fact]
     public async Task Poll_MirrorsWordsAndBits()
     {
-        var plc = new Device("plc", coils: 64, holdingRegisters: 256);
-        plc.Seed(TableKind.HoldingRegister, 100, new ushort[] { 0x1234, 0x5678, 0x9ABC });
-        plc.Seed(TableKind.Coil, 0, new[] { true, false, true, true, false, false, false, true });
+        var plc = new Device("plc", bits: 64, words: 256);
+        plc.Seed(TableKind.Words, 100, new ushort[] { 0x1234, 0x5678, 0x9ABC });
+        plc.Seed(TableKind.Bits, 0, new[] { true, false, true, true, false, false, false, true });
         await using var server = await McTestServer.Start(plc);
-        var local = new Device("local", discreteInputs: 32, holdingRegisters: 32);
+        var local = new Device("local", readOnlyBits: 32, words: 32);
         var provider = new CapturingProvider();
-        var remote = Remote(server.Port, [Entry("D100", 3, TableKind.HoldingRegister, 0), Entry("M0", 8, TableKind.DiscreteInput, 4)],
+        var remote = Remote(server.Port, [Entry("D100", 3, TableKind.Words, 0), Entry("M0", 8, TableKind.ReadOnlyBits, 4)],
             logger: provider.CreateLogger("mc"));
         var poller = new ClientPoller("mc", remote, 50, local, provider.CreateLogger("mc"));
 
@@ -45,10 +45,10 @@ public class McRemoteTests
         await task;
 
         var w = new ushort[3];
-        local.Read(TableKind.HoldingRegister, 0, w);
+        local.Read(TableKind.Words, 0, w);
         Assert.Equal([0x1234, 0x5678, 0x9ABC], w);
         var b = new bool[8];
-        local.Read(TableKind.DiscreteInput, 4, b);
+        local.Read(TableKind.ReadOnlyBits, 4, b);
         Assert.Equal([true, false, true, true, false, false, false, true], b);
         Assert.Contains(provider.Entries, e => e.EventId == Moz.Logging.CommLog.EventIds.Request.Id
             && e.Message.Contains("op=read") && e.Message.Contains("target=D100") && e.Message.Contains("qty=3") && e.Message.Contains("result=ok"));
@@ -57,48 +57,48 @@ public class McRemoteTests
     [Fact]
     public async Task Push_WritesWordsAndBits()
     {
-        var plc = new Device("plc", coils: 64, holdingRegisters: 256);
+        var plc = new Device("plc", bits: 64, words: 256);
         await using var server = await McTestServer.Start(plc);
-        var local = new Device("local", coils: 32, holdingRegisters: 32);
-        var remote = Remote(server.Port, [], [Entry("D10", 2, TableKind.HoldingRegister, 0), Entry("M16", 5, TableKind.Coil, 0)]);
+        var local = new Device("local", bits: 32, words: 32);
+        var remote = Remote(server.Port, [], [Entry("D10", 2, TableKind.Words, 0), Entry("M16", 5, TableKind.Bits, 0)]);
         var poller = new ClientPoller("mc", remote, 50, local, NullLogger.Instance);
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
         await Task.Delay(100);
-        local.Write(TableKind.HoldingRegister, 0, new ushort[] { 0xBEEF, 0x0001 });
-        local.Write(TableKind.Coil, 0, new[] { true, false, false, true, true });
+        local.Write(TableKind.Words, 0, new ushort[] { 0xBEEF, 0x0001 });
+        local.Write(TableKind.Bits, 0, new[] { true, false, false, true, true });
         await Task.Delay(300);
         Assert.False(poller.HasPendingPush);
         await cts.CancelAsync();
         await task;
 
         var w = new ushort[2];
-        plc.Read(TableKind.HoldingRegister, 10, w);
+        plc.Read(TableKind.Words, 10, w);
         Assert.Equal([0xBEEF, 0x0001], w);
         var b = new bool[5];
-        plc.Read(TableKind.Coil, 16, b);
+        plc.Read(TableKind.Bits, 16, b);
         Assert.Equal([true, false, false, true, true], b);
     }
 
     [Fact]
     public async Task EndCode_IsRejection_Logged_NotRetried_LoopContinues()
     {
-        var plc = new Device("plc", coils: 64, holdingRegisters: 256);
-        plc.Seed(TableKind.HoldingRegister, 0, new ushort[] { 0x4242 });
+        var plc = new Device("plc", bits: 64, words: 256);
+        plc.Seed(TableKind.Words, 0, new ushort[] { 0x4242 });
         await using var server = await McTestServer.Start(plc);
-        var local = new Device("local", holdingRegisters: 32);
+        var local = new Device("local", words: 32);
         var provider = new CapturingProvider();
         var remote = Remote(server.Port,
-            [Entry("D1000", 1, TableKind.HoldingRegister, 0), Entry("D0", 1, TableKind.HoldingRegister, 1)],   // D1000 is beyond the server's 256 words
-            [Entry("D1000", 1, TableKind.HoldingRegister, 2)],
+            [Entry("D1000", 1, TableKind.Words, 0), Entry("D0", 1, TableKind.Words, 1)],   // D1000 is beyond the server's 256 words
+            [Entry("D1000", 1, TableKind.Words, 2)],
             provider.CreateLogger("mc"));
         var poller = new ClientPoller("mc", remote, 50, local, provider.CreateLogger("mc"));
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
         await Task.Delay(100);
-        local.Write(TableKind.HoldingRegister, 2, new ushort[] { 1 });
+        local.Write(TableKind.Words, 2, new ushort[] { 1 });
         await Task.Delay(300);
         Assert.True(poller.IsConnected);
         Assert.False(poller.HasPendingPush);          // rejected = delivered
@@ -106,7 +106,7 @@ public class McRemoteTests
         await task;
 
         var w = new ushort[2];
-        local.Read(TableKind.HoldingRegister, 0, w);
+        local.Read(TableKind.Words, 0, w);
         Assert.Equal([0, 0x4242], w);                 // D1000 mirrored nothing, D0 kept working on the same connection
         Assert.Contains(provider.Entries, e => e.EventId == Moz.Logging.CommLog.EventIds.Request.Id
             && e.Message.Contains("op=read") && e.Message.Contains("target=D1000") && e.Message.Contains("err=C056"));
@@ -121,9 +121,9 @@ public class McRemoteTests
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start(); // accepts, never answers
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        var local = new Device("local", holdingRegisters: 32);
+        var local = new Device("local", words: 32);
         var provider = new CapturingProvider();
-        var remote = Remote(port, [Entry("D0", 1, TableKind.HoldingRegister, 0)], logger: provider.CreateLogger("mc"), timeoutMs: 200);
+        var remote = Remote(port, [Entry("D0", 1, TableKind.Words, 0)], logger: provider.CreateLogger("mc"), timeoutMs: 200);
         var poller = new ClientPoller("mc", remote, 100, local, provider.CreateLogger("mc"));
 
         using var cts = new CancellationTokenSource();
@@ -229,7 +229,7 @@ internal sealed class McTestServer : IAsyncDisposable
         {
             return Response(header, 0xC059, [], body);
         }
-        var table = isBit ? TableKind.Coil : TableKind.HoldingRegister;
+        var table = isBit ? TableKind.Bits : TableKind.Words;
         int size = _device.Length(table);
         if (points < 1 || head + points > size)
         {

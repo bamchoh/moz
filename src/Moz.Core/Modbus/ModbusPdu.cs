@@ -34,10 +34,10 @@ public static class ModbusPdu
         }
         return (FunctionCode)pdu[0] switch
         {
-            FunctionCode.ReadCoils => ReadBits(pdu, device, resp, TableKind.Coil),
-            FunctionCode.ReadDiscreteInputs => ReadBits(pdu, device, resp, TableKind.DiscreteInput),
-            FunctionCode.ReadHoldingRegisters => ReadRegs(pdu, device, resp, TableKind.HoldingRegister),
-            FunctionCode.ReadInputRegisters => ReadRegs(pdu, device, resp, TableKind.InputRegister),
+            FunctionCode.ReadCoils => ReadBits(pdu, device, resp, TableKind.Bits),
+            FunctionCode.ReadDiscreteInputs => ReadBits(pdu, device, resp, TableKind.ReadOnlyBits),
+            FunctionCode.ReadHoldingRegisters => ReadRegs(pdu, device, resp, TableKind.Words),
+            FunctionCode.ReadInputRegisters => ReadRegs(pdu, device, resp, TableKind.ReadOnlyWords),
             FunctionCode.WriteSingleCoil => WriteSingleCoil(pdu, device, resp),
             FunctionCode.WriteSingleRegister => WriteSingleRegister(pdu, device, resp),
             FunctionCode.WriteMultipleCoils => WriteMultipleBits(pdu, device, resp),
@@ -132,12 +132,12 @@ public static class ModbusPdu
         {
             return BadValue(resp, pdu[0]);
         }
-        if ((uint)addr >= (uint)device.Length(TableKind.Coil))
+        if ((uint)addr >= (uint)device.Length(TableKind.Bits))
         {
             return BadAddress(resp, pdu[0]);
         }
 
-        device.WriteBit(TableKind.Coil, addr, value == 0xFF00);
+        device.WriteBit(TableKind.Bits, addr, value == 0xFF00);
         pdu.CopyTo(resp[..5]); // FC05 echoes the request
         return new PduOutcome(5, 0);
     }
@@ -152,13 +152,13 @@ public static class ModbusPdu
         ushort addr = BigEndianUInt16(pdu[1..]);
         ushort value = BigEndianUInt16(pdu[3..]);
 
-        if ((uint)addr >= (uint)device.Length(TableKind.HoldingRegister))
+        if ((uint)addr >= (uint)device.Length(TableKind.Words))
         {
             return BadAddress(resp, pdu[0]);
         }
 
         Span<ushort> one = [value];
-        device.Write(TableKind.HoldingRegister, addr, one);
+        device.Write(TableKind.Words, addr, one);
         pdu.CopyTo(resp[..5]); // FC06 echoes the request
         return new PduOutcome(5, 0);
     }
@@ -179,7 +179,7 @@ public static class ModbusPdu
         {
             return BadValue(resp, pdu[0]);
         }
-        if ((uint)addr + qty > (uint)device.Length(TableKind.Coil))
+        if ((uint)addr + qty > (uint)device.Length(TableKind.Bits))
         {
             return BadAddress(resp, pdu[0]);
         }
@@ -189,7 +189,7 @@ public static class ModbusPdu
         {
             bits[i] = (pdu[6 + i / 8] & (1 << (i % 8))) != 0;
         }
-        device.Write(TableKind.Coil, addr, bits);
+        device.Write(TableKind.Bits, addr, bits);
 
         // response echoes fc, addr, qty (no byteCount, no data)
         resp[0] = pdu[0];
@@ -213,7 +213,7 @@ public static class ModbusPdu
         {
             return BadValue(resp, pdu[0]);
         }
-        if ((uint)addr + qty > (uint)device.Length(TableKind.HoldingRegister))
+        if ((uint)addr + qty > (uint)device.Length(TableKind.Words))
         {
             return BadAddress(resp, pdu[0]);
         }
@@ -223,7 +223,7 @@ public static class ModbusPdu
         {
             words[i] = BigEndianUInt16(pdu[(6 + i * 2)..]);
         }
-        device.Write(TableKind.HoldingRegister, addr, words);
+        device.Write(TableKind.Words, addr, words);
 
         resp[0] = pdu[0];
         BigEndian(resp[1..], addr);

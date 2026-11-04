@@ -59,17 +59,17 @@ public sealed class DeviceConfig
     public string Name { get; set; } = "";
 
     /// <summary>Table sizes; defaults are 65536 (karakuri parity).</summary>
-    [TomlPropertyName("coils")]
-    public int Coils { get; set; } = 65536;
+    [TomlPropertyName("bits")]
+    public int Bits { get; set; } = 65536;
 
-    [TomlPropertyName("discrete")]
-    public int Discrete { get; set; } = 65536;
+    [TomlPropertyName("read_only_bits")]
+    public int ReadOnlyBits { get; set; } = 65536;
 
-    [TomlPropertyName("holding")]
-    public int Holding { get; set; } = 65536;
+    [TomlPropertyName("words")]
+    public int Words { get; set; } = 65536;
 
-    [TomlPropertyName("input")]
-    public int Input { get; set; } = 65536;
+    [TomlPropertyName("read_only_words")]
+    public int ReadOnlyWords { get; set; } = 65536;
 
     [TomlExtensionData]
     public IDictionary<string, object?>? Extra { get; set; }
@@ -89,7 +89,7 @@ public sealed class VariableConfig
     [TomlPropertyName("device")]
     public string Device { get; set; } = "";
 
-    /// <summary>coil | discrete | holding | input.</summary>
+    /// <summary>bits | read_only_bits | words | read_only_words.</summary>
     [TomlPropertyName("kind")]
     public string Kind { get; set; } = "";
 
@@ -123,10 +123,10 @@ public sealed class VariableConfig
     /// <summary>Parse after validation; throws on invalid strings (validated first).</summary>
     public TableKind ToTableKind() => Kind switch
     {
-        "coil" => TableKind.Coil,
-        "discrete" => TableKind.DiscreteInput,
-        "holding" => TableKind.HoldingRegister,
-        "input" => TableKind.InputRegister,
+        "bits" => TableKind.Bits,
+        "read_only_bits" => TableKind.ReadOnlyBits,
+        "words" => TableKind.Words,
+        "read_only_words" => TableKind.ReadOnlyWords,
         _ => throw new FormatException($"invalid kind \"{Kind}\""),
     };
 
@@ -330,7 +330,7 @@ public sealed class PollConfig
     [TomlPropertyName("count")]
     public int? Count { get; set; }
 
-    /// <summary>Modbus / mc-3e: local table coil|discrete|holding|input. Default derived from fc / device; rejected on opcua.</summary>
+    /// <summary>Modbus / mc-3e: local table bits|read_only_bits|words|read_only_words. Default derived from fc / device; rejected on opcua.</summary>
     [TomlPropertyName("local_kind")]
     public string? LocalKind { get; set; }
 
@@ -344,10 +344,10 @@ public sealed class PollConfig
     /// <summary>Default local_kind for a read fc; null for an invalid fc.</summary>
     public static string? DefaultLocalKind(int fc) => fc switch
     {
-        1 => "coil",
-        2 => "discrete",
-        3 => "holding",
-        4 => "input",
+        1 => "bits",
+        2 => "read_only_bits",
+        3 => "words",
+        4 => "read_only_words",
         _ => null,
     };
 
@@ -375,7 +375,7 @@ public sealed class PushConfig
     [TomlPropertyName("variable")]
     public string? Variable { get; set; }
 
-    /// <summary>Modbus / mc-3e: local table coil|discrete|holding|input. Default derived from fc / device; rejected on opcua.</summary>
+    /// <summary>Modbus / mc-3e: local table bits|read_only_bits|words|read_only_words. Default derived from fc / device; rejected on opcua.</summary>
     [TomlPropertyName("local_kind")]
     public string? LocalKind { get; set; }
 
@@ -397,8 +397,8 @@ public sealed class PushConfig
     /// <summary>Default local_kind for a write fc; null for an invalid fc.</summary>
     public static string? DefaultLocalKind(int fc) => fc switch
     {
-        5 or 15 => "coil",
-        6 or 16 => "holding",
+        5 or 15 => "bits",
+        6 or 16 => "words",
         _ => null,
     };
 
@@ -414,10 +414,10 @@ public static class LocalKinds
     {
         switch (kind)
         {
-            case "coil": table = TableKind.Coil; return true;
-            case "discrete": table = TableKind.DiscreteInput; return true;
-            case "holding": table = TableKind.HoldingRegister; return true;
-            case "input": table = TableKind.InputRegister; return true;
+            case "bits": table = TableKind.Bits; return true;
+            case "read_only_bits": table = TableKind.ReadOnlyBits; return true;
+            case "words": table = TableKind.Words; return true;
+            case "read_only_words": table = TableKind.ReadOnlyWords; return true;
             default: table = default; return false;
         }
     }
@@ -485,7 +485,7 @@ public sealed class ServerConfig
     [TomlPropertyName("endpoint")]
     public string? Endpoint { get; set; }
 
-    /// <summary>mc-3e / fins: where protocol devices (areas) live in the memory model (mc-3e defaults: D→holding, M→coil, X→discrete; fins default: DM→holding).</summary>
+    /// <summary>mc-3e / fins: where protocol devices (areas) live in the memory model (mc-3e defaults: D→words, M→bits, X→read_only_bits; fins default: DM→words).</summary>
     [TomlPropertyName("map")]
     public List<ServerMapConfig> Map { get; set; } = [];
 
@@ -542,7 +542,7 @@ public sealed class ServerMapConfig
     [TomlPropertyName("device")]
     public string Device { get; set; } = "";
 
-    /// <summary>coil | discrete | holding | input; bitness must match the device (FINS areas are holdingRegisters: words | read_only_words).</summary>
+    /// <summary>bits | read_only_bits | words | read_only_words; bitness must match the device (FINS areas are words: words | read_only_words).</summary>
     [TomlPropertyName("kind")]
     public string Kind { get; set; } = "";
 

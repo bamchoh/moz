@@ -28,13 +28,13 @@ public class VariableConfigTests : IDisposable
         """
         [[device]]
         name = "plc1"
-        holding = 100
-        coils = 100
+        words = 100
+        bits = 100
 
         [[variable]]
         name = "temperature"
         device = "plc1"
-        kind = "holding"
+        kind = "words"
         offset = 0
         type = "real"
 
@@ -79,7 +79,7 @@ public class VariableConfigTests : IDisposable
     [InlineData("type", "float32")]
     public void BadEnum_Fails(string key, string value)
     {
-        var toml = Base.Replace("kind = \"holding\"", $"kind = \"{(key == "kind" ? value : "holding")}\"")
+        var toml = Base.Replace("kind = \"words\"", $"kind = \"{(key == "kind" ? value : "words")}\"")
                         .Replace("type = \"real\"", $"type = \"{(key == "type" ? value : "real")}\"");
         var result = Moz.Config.ConfigLoader.Load(WriteFile("enum.toml", toml));
         Assert.False(result.Ok);
@@ -91,7 +91,7 @@ public class VariableConfigTests : IDisposable
     [InlineData("ulint", Moz.Devices.VariableType.Ulint)]
     public void LintUlint_Types_Load(string type, Moz.Devices.VariableType expected)
     {
-        var toml = AppendVariable("big", "holding", "10", type);
+        var toml = AppendVariable("big", "words", "10", type);
         var result = Moz.Config.ConfigLoader.Load(WriteFile($"{type}.toml", toml));
         Assert.True(result.Ok, string.Join("\n", result.Errors));
         Assert.Equal(expected, result.Config!.Variable[1].ToVariableType());
@@ -101,7 +101,7 @@ public class VariableConfigTests : IDisposable
     public void Lint_FourWords_RangeCheck()
     {
         // holding = 100 words; a lint at offset 97 needs 4 → over by one
-        var toml = AppendVariable("big", "holding", "97", "lint");
+        var toml = AppendVariable("big", "words", "97", "lint");
         var result = Moz.Config.ConfigLoader.Load(WriteFile("lintoor.toml", toml));
         Assert.False(result.Ok);
         Assert.Contains(result.Errors, e => e.Message.Contains("offset 97"));
@@ -113,16 +113,16 @@ public class VariableConfigTests : IDisposable
         var toml = Base.Replace("type = \"real\"", "type = \"bool\"");
         var result = Moz.Config.ConfigLoader.Load(WriteFile("boolword.toml", toml));
         Assert.False(result.Ok);
-        Assert.Contains(result.Errors, e => e.Message.Contains("type \"bool\" requires kind coil|discrete"));
+        Assert.Contains(result.Errors, e => e.Message.Contains("type \"bool\" requires kind bits|read_only_bits"));
     }
 
     [Fact]
     public void Int_OnBitTable_Fails()
     {
-        var toml = Base.Replace("kind = \"holding\"", "kind = \"coil\"").Replace("type = \"real\"", "type = \"int\"");
+        var toml = Base.Replace("kind = \"words\"", "kind = \"bits\"").Replace("type = \"real\"", "type = \"int\"");
         var result = Moz.Config.ConfigLoader.Load(WriteFile("intbit.toml", toml));
         Assert.False(result.Ok);
-        Assert.Contains(result.Errors, e => e.Message.Contains("type \"int\" requires kind holding|input"));
+        Assert.Contains(result.Errors, e => e.Message.Contains("type \"int\" requires kind words|read_only_words"));
     }
 
     [Fact]
@@ -138,7 +138,7 @@ public class VariableConfigTests : IDisposable
     [Fact]
     public void UnknownDeviceReference_Fails()
     {
-        var toml = Base.Replace("device = \"plc1\"\nkind = \"holding\"", "device = \"nope\"\nkind = \"holding\"");
+        var toml = Base.Replace("device = \"plc1\"\nkind = \"words\"", "device = \"nope\"\nkind = \"words\"");
         var result = Moz.Config.ConfigLoader.Load(WriteFile("ref.toml", toml));
         Assert.False(result.Ok);
         Assert.Contains(result.Errors, e => e.Message.Contains("references device \"nope\" which is not declared"));
@@ -147,7 +147,7 @@ public class VariableConfigTests : IDisposable
     [Fact]
     public void DuplicateName_PerDevice_Fails()
     {
-        var dupe = AppendVariable("temperature", "holding", "10", "real");
+        var dupe = AppendVariable("temperature", "words", "10", "real");
         var result = Moz.Config.ConfigLoader.Load(WriteFile("dupe.toml", dupe));
         Assert.False(result.Ok);
         Assert.Contains(result.Errors, e => e.Message.Contains("duplicate variable name \"temperature\""));
@@ -157,7 +157,7 @@ public class VariableConfigTests : IDisposable
         """
         [[device]]
         name = "plc1"
-        holding = 100
+        words = 100
 
         [[device]]
         name = "plc2"
@@ -165,14 +165,14 @@ public class VariableConfigTests : IDisposable
         [[variable]]
         name = "temperature"
         device = "plc1"
-        kind = "holding"
+        kind = "words"
         offset = 0
         type = "real"
 
         [[variable]]
         name = "temperature"
         device = "plc2"
-        kind = "holding"
+        kind = "words"
         offset = 1
         type = "real"
 
@@ -195,7 +195,7 @@ public class VariableConfigTests : IDisposable
     public void OverlappingRange_Fails()
     {
         // real at 0 occupies words 0-1; other at 1 overlaps
-        var overlap = AppendVariable("other", "holding", "1", "dint");
+        var overlap = AppendVariable("other", "words", "1", "dint");
         var result = Moz.Config.ConfigLoader.Load(WriteFile("overlap.toml", overlap));
         Assert.False(result.Ok);
         Assert.Contains(result.Errors, e => e.Message.Contains("overlaps"));
@@ -205,7 +205,7 @@ public class VariableConfigTests : IDisposable
     public void AdjoiningNonOverlapping_IsOK()
     {
         // real at 0 covers words 0-1; another int at 2 does not overlap
-        var ok = AppendVariable("rpm", "holding", "2", "int");
+        var ok = AppendVariable("rpm", "words", "2", "int");
         var result = Moz.Config.ConfigLoader.Load(WriteFile("adjoin.toml", ok));
         Assert.True(result.Ok, string.Join("\n", result.Errors));
     }
@@ -221,7 +221,7 @@ public class VariableConfigTests : IDisposable
     [Fact]
     public void ArrayCount_RangeChecked()
     {
-        var big = AppendVariable("big", "holding", "99", "int", "5");
+        var big = AppendVariable("big", "words", "99", "int", "5");
         var result = Moz.Config.ConfigLoader.Load(WriteFile("bigcount.toml", big));
         Assert.False(result.Ok);
         Assert.Contains(result.Errors, e => e.Message.Contains("offset 99"));
@@ -239,7 +239,7 @@ public class VariableConfigTests : IDisposable
     // --- string / time types (phase 8) ------------------------------------------
 
     private const string StringVar =
-        "[[variable]]\nname = \"label\"\ndevice = \"plc1\"\nkind = \"holding\"\noffset = 10\ntype = \"string\"\nlength = 5";
+        "[[variable]]\nname = \"label\"\ndevice = \"plc1\"\nkind = \"words\"\noffset = 10\ntype = \"string\"\nlength = 5";
 
     [Fact]
     public void String_WithLength_Loads()
@@ -253,7 +253,7 @@ public class VariableConfigTests : IDisposable
     [Fact]
     public void String_RequiresLength()
     {
-        var toml = AppendVariable("label", "holding", "10", "string");
+        var toml = AppendVariable("label", "words", "10", "string");
         var result = Moz.Config.ConfigLoader.Load(WriteFile("strnolen.toml", toml));
         Assert.False(result.Ok);
         Assert.Contains(result.Errors, e => e.Message.Contains("variable.length is required for type \"string\""));
@@ -267,7 +267,7 @@ public class VariableConfigTests : IDisposable
     public void String_Length_Range(int length, bool ok)
     {
         var toml = AppendBlock(StringVar.Replace("length = 5", $"length = {length}"))
-            .Replace("holding = 100", "holding = 200");
+            .Replace("words = 100", "words = 200");
         var result = Moz.Config.ConfigLoader.Load(WriteFile($"strlen{length}.toml", toml));
         Assert.Equal(ok, result.Ok);
         if (!ok)
@@ -302,7 +302,7 @@ public class VariableConfigTests : IDisposable
     [InlineData("dt", Moz.Devices.VariableType.Dt)]
     public void TimeTypes_Load(string type, Moz.Devices.VariableType expected)
     {
-        var toml = AppendVariable("t", "holding", "10", type);
+        var toml = AppendVariable("t", "words", "10", type);
         var result = Moz.Config.ConfigLoader.Load(WriteFile($"{type}.toml", toml));
         Assert.True(result.Ok, string.Join("\n", result.Errors));
         Assert.Equal(expected, result.Config!.Variable[1].ToVariableType());
@@ -311,7 +311,7 @@ public class VariableConfigTests : IDisposable
     [Fact]
     public void Dt_FourWords_RangeCheck()
     {
-        var toml = AppendVariable("stamp", "holding", "97", "dt");
+        var toml = AppendVariable("stamp", "words", "97", "dt");
         var result = Moz.Config.ConfigLoader.Load(WriteFile("dtoor.toml", toml));
         Assert.False(result.Ok);
         Assert.Contains(result.Errors, e => e.Message.Contains("offset 97 (+4 cells)"));
@@ -320,10 +320,10 @@ public class VariableConfigTests : IDisposable
     [Fact]
     public void TimeType_OnBitTable_Fails()
     {
-        var toml = Base.Replace("kind = \"holding\"", "kind = \"coil\"").Replace("type = \"real\"", "type = \"time\"");
+        var toml = Base.Replace("kind = \"words\"", "kind = \"bits\"").Replace("type = \"real\"", "type = \"time\"");
         var result = Moz.Config.ConfigLoader.Load(WriteFile("timebit.toml", toml));
         Assert.False(result.Ok);
-        Assert.Contains(result.Errors, e => e.Message.Contains("type \"time\" requires kind holding|input"));
+        Assert.Contains(result.Errors, e => e.Message.Contains("type \"time\" requires kind words|read_only_words"));
     }
 
     // --- value = ... (initial values) -------------------------------------------------
@@ -335,8 +335,8 @@ public class VariableConfigTests : IDisposable
     public void Value_Loads_ForScalarArrayAndStruct()
     {
         var toml = AppendBlock(
-                "[[variable]]\nname = \"flags\"\ndevice = \"plc1\"\nkind = \"coil\"\noffset = 0\ntype = \"bool\"\ncount = 2\nvalue = [true, false]\n"
-                + "\n[[variable]]\nname = \"stamp\"\ndevice = \"plc1\"\nkind = \"holding\"\noffset = 10\ntype = \"dt\"\nvalue = 2026-11-01T09:00:00Z")
+                "[[variable]]\nname = \"flags\"\ndevice = \"plc1\"\nkind = \"bits\"\noffset = 0\ntype = \"bool\"\ncount = 2\nvalue = [true, false]\n"
+                + "\n[[variable]]\nname = \"stamp\"\ndevice = \"plc1\"\nkind = \"words\"\noffset = 10\ntype = \"dt\"\nvalue = 2026-11-01T09:00:00Z")
             .Replace("type = \"real\"", "type = \"real\"\nvalue = 20.5");
         var result = Moz.Config.ConfigLoader.Load(WriteFile("value.toml", toml));
         Assert.True(result.Ok, Messages(result));
@@ -376,7 +376,7 @@ public class VariableConfigTests : IDisposable
             [[variable]]
             name = "motor"
             device = "plc1"
-            kind = "holding"
+            kind = "words"
             offset = 50
             type = "Motor"
             value = {{value}}

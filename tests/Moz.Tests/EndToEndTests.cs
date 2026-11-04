@@ -26,9 +26,9 @@ public class EndToEndTests
         client.Connect(new IPEndPoint(IPAddress.Loopback, server.Port), ModbusEndianness.BigEndian);
 
         // FC03 — read holding registers
-        var holding = client.ReadHoldingRegisters<ushort>(1, 0, 2);
-        Assert.Equal((ushort)0x1234, holding[0]);
-        Assert.Equal((ushort)0xABCD, holding[1]);
+        var words = client.ReadHoldingRegisters<ushort>(1, 0, 2);
+        Assert.Equal((ushort)0x1234, words[0]);
+        Assert.Equal((ushort)0xABCD, words[1]);
 
         // FC04 — read input registers
         var inputs = client.ReadInputRegisters<ushort>(1, 0, 1);
@@ -65,10 +65,10 @@ public class EndToEndTests
             0x0F, 0x00, 0x1E, 0x00, 0x04, 0x01, 0x0B, // FC15: addr=30 qty=4 bc=1 bits=1011
         ];
         await SendFrameAsync(server.Port, fc15);
-        Assert.True(device.ReadBit(TableKind.Coil, 30));
-        Assert.True(device.ReadBit(TableKind.Coil, 31));
-        Assert.False(device.ReadBit(TableKind.Coil, 32));
-        Assert.True(device.ReadBit(TableKind.Coil, 33));
+        Assert.True(device.ReadBit(TableKind.Bits, 30));
+        Assert.True(device.ReadBit(TableKind.Bits, 31));
+        Assert.False(device.ReadBit(TableKind.Bits, 32));
+        Assert.True(device.ReadBit(TableKind.Bits, 33));
     }
 
     [Fact]
@@ -176,7 +176,7 @@ public class EndToEndTests
     [Fact]
     public async Task TwoServers_SameDevice_ConcurrentClients()
     {
-        var device = new Device("t", holdingRegisters: 100);
+        var device = new Device("t", words: 100);
         await using var server1 = await TestServer.Start(device);
         await using var server2 = await TestServer.Start(device);
 

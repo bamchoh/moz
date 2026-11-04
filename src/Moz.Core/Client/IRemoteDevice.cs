@@ -5,8 +5,8 @@ namespace Moz.Client;
 /// <summary>A range of local cells mirrored by one poll or push item.</summary>
 public readonly record struct LocalRange(TableKind Table, int Offset, int Count)
 {
-    /// <summary>Bit tables (coil/discrete) carry bools, word tables carry ushorts.</summary>
-    public bool IsBit => Table is TableKind.Coil or TableKind.DiscreteInput;
+    /// <summary>Bit tables (bits/read_only_bits) carry bools, word tables carry ushorts.</summary>
+    public bool IsBit => Table is TableKind.Bits or TableKind.ReadOnlyBits;
 }
 
 /// <summary>

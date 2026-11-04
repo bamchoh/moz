@@ -34,8 +34,8 @@ public class OpcUaAuthTests
         try
         {
             var port = (ushort)Math.Clamp(Interlocked.Increment(ref s_port), 48621, 48699);
-            var device = new Device("plc-ua", holdingRegisters: 100, coils: 100);
-            var vars = new VariableTable(device, [new Variable("temp", TableKind.HoldingRegister, 0, VariableType.Real)], NullLogger.Instance);
+            var device = new Device("plc-ua", words: 100, bits: 100);
+            var vars = new VariableTable(device, [new Variable("temp", TableKind.Words, 0, VariableType.Real)], NullLogger.Instance);
             var runner = new OpcUaServerRunner("ua-auth", $"opc.tcp://127.0.0.1:{port}", device, vars, NullLogger.Instance, options);
             var cts = new CancellationTokenSource();
             var run = runner.RunAsync(cts.Token);

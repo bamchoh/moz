@@ -7,7 +7,7 @@ namespace Moz.Tests;
 
 /// <summary>
 /// Omron FINS server (phase 19): the area table, the pure frame handler
-/// against a device (default map DM → holding registers, user maps for the rest), the
+/// against a device (default map DM → words, user maps for the rest), the
 /// FINS/TCP framing with its node address exchange, and the TCP / UDP
 /// runners end to end with hand-written clients.
 /// </summary>
@@ -17,13 +17,13 @@ public class FinsServerTests
     private const string Header = "800002000A00000B0001";
     private const string ResponseHeader = "C00002000B00000A0001";
 
-    private static Device NewDevice() => new("plc", coils: 256, discreteInputs: 256, holdingRegisters: 256, inputRegisters: 256);
+    private static Device NewDevice() => new("plc", bits: 256, readOnlyBits: 256, words: 256, readOnlyWords: 256);
 
-    /// <summary>CIO 0..127 → holding 128..255 (CIO100 ↔ holding[228]), E0 → input 0..255, plus the default DM.</summary>
+    /// <summary>CIO 0..127 → words 128..255 (CIO100 ↔ words[228]), E0 → read_only_words 0..255, plus the default DM.</summary>
     private static FinsMap[] UserMaps(Device device) => FinsMap.Merge(device,
     [
-        new FinsMap(Area("CIO"), TableKind.HoldingRegister, 128, 128),
-        new FinsMap(Area("E0"), TableKind.InputRegister, 0, 256),
+        new FinsMap(Area("CIO"), TableKind.Words, 128, 128),
+        new FinsMap(Area("E0"), TableKind.ReadOnlyWords, 0, 256),
     ]);
 
     private static ushort Word(Device device, TableKind table, int index)
@@ -113,7 +113,7 @@ public class FinsServerTests
     public void Read_Words_FromDefaultMap()
     {
         var device = NewDevice();
-        device.Seed(TableKind.HoldingRegister, 100, new ushort[] { 0x1234, 0x0002, 0xFFFF });
+        device.Seed(TableKind.Words, 100, new ushort[] { 0x1234, 0x0002, 0xFFFF });
         var o = Handle(device, Header + "0101" + "82" + "0064" + "00" + "0003");
         Assert.Equal(ResponseHeader + "0101" + "0000" + "12340002FFFF", Convert.ToHexString(o.Response));
         Assert.Equal(("read", "DM100", 3, 0, true), (o.Op, o.Target, o.Points, (int)o.EndCode, o.ResponseRequired));
@@ -123,8 +123,8 @@ public class FinsServerTests
     public void Read_Bits_OfMappedWordArea()
     {
         var device = NewDevice();
-        device.Seed(TableKind.HoldingRegister, 228, new ushort[] { 0x8031, 0x0001 });
-        // CIO 100.04 .. 100.06 → coil 4, 5, 6 of holding[228]
+        device.Seed(TableKind.Words, 228, new ushort[] { 0x8031, 0x0001 });
+        // CIO 100.04 .. 100.06 → bits 4, 5, 6 of words[228]
         var o = Handle(device, Header + "0101" + "30" + "0064" + "04" + "0003", UserMaps(device));
         Assert.Equal(ResponseHeader + "0101" + "0000" + "010100", Convert.ToHexString(o.Response));
         Assert.Equal(("read", "CIO100.04", 3), (o.Op, o.Target, o.Points));
@@ -141,7 +141,7 @@ public class FinsServerTests
         Assert.Equal(ResponseHeader + "0102" + "0000", Convert.ToHexString(o.Response));
         Assert.Equal(("write", "DM100", 2, 0), (o.Op, o.Target, o.Points, (int)o.EndCode));
         var w = new ushort[2];
-        device.Read(TableKind.HoldingRegister, 100, w);
+        device.Read(TableKind.Words, 100, w);
         Assert.Equal([0x1234, 0x5678], w);
     }
 
@@ -149,13 +149,13 @@ public class FinsServerTests
     public void Write_Bits_ReadModifyWrites_TheWords()
     {
         var device = NewDevice();
-        device.Seed(TableKind.HoldingRegister, 228, new ushort[] { 0x8031, 0x0001 });
+        device.Seed(TableKind.Words, 228, new ushort[] { 0x8031, 0x0001 });
         // CIO 100.14 = 1, 100.15 = 0, 101.00 = 0, 101.01 = 1
         var o = Handle(device, Header + "0102" + "30" + "0064" + "0E" + "0004" + "01000001", UserMaps(device));
         Assert.Equal(0, o.EndCode);
         Assert.Equal(("write", "CIO100.14", 4), (o.Op, o.Target, o.Points));
         var w = new ushort[2];
-        device.Read(TableKind.HoldingRegister, 228, w);
+        device.Read(TableKind.Words, 228, w);
         Assert.Equal([0x4031, 0x0002], w);
     }
 
@@ -163,9 +163,9 @@ public class FinsServerTests
     public void MultipleRead_MixesAreasAndUnits()
     {
         var device = NewDevice();
-        device.Seed(TableKind.HoldingRegister, 100, new ushort[] { 0x1234 });
-        device.Seed(TableKind.HoldingRegister, 228, new ushort[] { 0x0010 });
-        device.Seed(TableKind.InputRegister, 5, new ushort[] { 0xABCD });
+        device.Seed(TableKind.Words, 100, new ushort[] { 0x1234 });
+        device.Seed(TableKind.Words, 228, new ushort[] { 0x0010 });
+        device.Seed(TableKind.ReadOnlyWords, 5, new ushort[] { 0xABCD });
         var o = Handle(device, Header + "0104" + "82006400" + "30006404" + "A0000500", UserMaps(device));
         Assert.Equal(ResponseHeader + "0104" + "0000" + "82" + "1234" + "30" + "01" + "A0" + "ABCD", Convert.ToHexString(o.Response));
         Assert.Equal(("read-multi", "DM100", 3, 0), (o.Op, o.Target, o.Points, (int)o.EndCode));
@@ -214,7 +214,7 @@ public class FinsServerTests
         var device = NewDevice();
         var o = Handle(device, Header + "0102" + "A0" + "0005" + "00" + "0001" + "1234", UserMaps(device));
         Assert.Equal(0x2101, o.EndCode);
-        Assert.Equal(0, Word(device, TableKind.InputRegister, 5));
+        Assert.Equal(0, Word(device, TableKind.ReadOnlyWords, 5));
     }
 
     [Fact]
@@ -250,9 +250,9 @@ public class FinsServerTests
     public void UserMap_OverridesDefault_And_AddsAreas()
     {
         var device = NewDevice();
-        var maps = FinsMap.Merge(device, [new FinsMap(Area("DM"), TableKind.HoldingRegister, 200, 10)]);
+        var maps = FinsMap.Merge(device, [new FinsMap(Area("DM"), TableKind.Words, 200, 10)]);
         Assert.Single(maps);
-        device.Seed(TableKind.HoldingRegister, 203, new ushort[] { 0x0A0B });
+        device.Seed(TableKind.Words, 203, new ushort[] { 0x0A0B });
         var o = Handle(device, Header + "0101" + "82" + "0003" + "00" + "0001", maps);
         Assert.Equal(ResponseHeader + "0101" + "0000" + "0A0B", Convert.ToHexString(o.Response));
         o = Handle(device, Header + "0101" + "82" + "000A" + "00" + "0001", maps);
@@ -319,7 +319,7 @@ public class FinsServerTests
     public async Task Tcp_Handshake_Read_Write()
     {
         var plc = NewDevice();
-        plc.Seed(TableKind.HoldingRegister, 0, new ushort[] { 0x1111, 0x2222 });
+        plc.Seed(TableKind.Words, 0, new ushort[] { 0x1111, 0x2222 });
         var provider = new CapturingProvider();
         using var cts = new CancellationTokenSource();
         var server = await StartTcpAsync(plc, provider, cts.Token);
@@ -339,7 +339,7 @@ public class FinsServerTests
         // write DM5
         var write = await ExchangeAsync(stream, FinsTcp.Build(FinsTcp.CommandFrame, 0, Convert.FromHexString("80000200" + "0A00" + "0001" + "00" + "02" + "0102" + "82" + "0005" + "00" + "0001" + "BEEF")));
         Assert.EndsWith("0102" + "0000", Convert.ToHexString(write));
-        Assert.Equal(0xBEEF, Word(plc, TableKind.HoldingRegister, 5));
+        Assert.Equal(0xBEEF, Word(plc, TableKind.Words, 5));
 
         await ExpectLogAsync(provider, e => e.EventId == Moz.Logging.CommLog.EventIds.ConnAccepted.Id);
         await ExpectLogAsync(provider, e => e.EventId == Moz.Logging.CommLog.EventIds.Request.Id
@@ -410,7 +410,7 @@ public class FinsServerTests
     public async Task Udp_Read_Write_NoResponseFlag_And_Malformed()
     {
         var plc = NewDevice();
-        plc.Seed(TableKind.HoldingRegister, 0, new ushort[] { 0x1111, 0x2222 });
+        plc.Seed(TableKind.Words, 0, new ushort[] { 0x1111, 0x2222 });
         var provider = new CapturingProvider();
         var server = new FinsUdpServer("fins-udp", new IPEndPoint(IPAddress.Loopback, 0), plc, FinsMap.Defaults(plc), provider.CreateLogger("srv"));
         using var cts = new CancellationTokenSource();
@@ -433,7 +433,7 @@ public class FinsServerTests
         await client.SendAsync(Convert.FromHexString(Header + "0101" + "82" + "0005" + "00" + "0001"), target);
         resp = await client.ReceiveAsync(new CancellationTokenSource(2000).Token);
         Assert.Equal(ResponseHeader + "0101" + "0000" + "BEEF", Convert.ToHexString(resp.Buffer));
-        Assert.Equal(0xBEEF, Word(plc, TableKind.HoldingRegister, 5));
+        Assert.Equal(0xBEEF, Word(plc, TableKind.Words, 5));
         await ExpectLogAsync(provider, e => e.EventId == Moz.Logging.CommLog.EventIds.MalformedFrame.Id);
         await ExpectLogAsync(provider, e => e.EventId == Moz.Logging.CommLog.EventIds.Request.Id && e.Message.Contains("op=write") && e.Message.Contains("target=DM5"));
         cts.Cancel();

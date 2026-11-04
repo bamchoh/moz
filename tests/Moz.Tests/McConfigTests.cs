@@ -25,8 +25,8 @@ public class McConfigTests : IDisposable
         """
         [[device]]
         name = "plc-mirror"
-        coils = 100
-        holding = 100
+        bits = 100
+        words = 100
 
         [[client]]
         name = "mc1"
@@ -59,8 +59,8 @@ public class McConfigTests : IDisposable
         Assert.Null(c.RemoteUnit);
         Assert.Equal("D100", c.Poll[0].Remote);
         Assert.Null(c.Poll[0].Fc);
-        Assert.Equal("holding", c.Poll[0].LocalKind);   // D is a word device
-        Assert.Equal("coil", c.Push[0].LocalKind);      // M is a bit device
+        Assert.Equal("words", c.Poll[0].LocalKind);   // D is a word device
+        Assert.Equal("bits", c.Push[0].LocalKind);      // M is a bit device
         Assert.Null(c.Push[0].Fc);
     }
 
@@ -75,9 +75,9 @@ public class McConfigTests : IDisposable
         var c = result.Config!.Client[0];
         Assert.Equal(1, c.RemoteUnit);
         Assert.Equal(3, c.Poll[0].Fc);
-        Assert.Equal("holding", c.Poll[0].LocalKind);
+        Assert.Equal("words", c.Poll[0].LocalKind);
         Assert.Equal(15, c.Push[0].Fc);
-        Assert.Equal("coil", c.Push[0].LocalKind);
+        Assert.Equal("bits", c.Push[0].LocalKind);
     }
 
     [Theory]
@@ -88,8 +88,8 @@ public class McConfigTests : IDisposable
     [InlineData("count = 3", "count = 961", "poll.count value 961 is out of range 1..960")]
     [InlineData("count = 8", "count = 7169", "push.count value 7169 is out of range 1..7168")]
     [InlineData("remote = \"D100\"", "remote = \"D16777214\"", "24-bit")]
-    [InlineData("local_offset = 10", "local_offset = 10\nlocal_kind = \"holding\"", "push.local_kind value \"holding\" does not match")]
-    [InlineData("local_offset = 0", "local_offset = 0\nlocal_kind = \"discrete\"", "poll.local_kind value \"discrete\" does not match")]
+    [InlineData("local_offset = 10", "local_offset = 10\nlocal_kind = \"words\"", "push.local_kind value \"words\" does not match")]
+    [InlineData("local_offset = 0", "local_offset = 0\nlocal_kind = \"read_only_bits\"", "poll.local_kind value \"read_only_bits\" does not match")]
     [InlineData("local_offset = 0", "local_offset = 98", "poll local_offset 98 (+3 cells) exceeds device")]
     [InlineData("remote_addr = \"192.168.0.20:5000\"", "remote_addr = \"192.168.0.20:5000\"\nremote_unit = 1", "client.remote_unit is only valid for modbus")]
     [InlineData("remote_addr = \"192.168.0.20:5000\"", "remote_addr = \"192.168.0.20:5000\"\nnetwork = 256", "client.network value 256 is out of range 0..255")]
@@ -122,10 +122,10 @@ public class McConfigTests : IDisposable
         """
         [[device]]
         name = "plc1"
-        coils = 100
-        discrete = 100
-        holding = 100
-        input = 100
+        bits = 100
+        read_only_bits = 100
+        words = 100
+        read_only_words = 100
 
         [[server]]
         name = "mc-a"
@@ -135,7 +135,7 @@ public class McConfigTests : IDisposable
 
         [[server.map]]
         device = "W"
-        kind = "input"
+        kind = "read_only_words"
         offset = 10
         count = 20
         """;
@@ -149,7 +149,7 @@ public class McConfigTests : IDisposable
         Assert.Equal("mc-3e", s.Protocol);
         Assert.Equal(5000, s.Port);
         var m = Assert.Single(s.Map);
-        Assert.Equal(("W", "input", 10, 20), (m.Device, m.Kind, m.Offset, m.Count));
+        Assert.Equal(("W", "read_only_words", 10, 20), (m.Device, m.Kind, m.Offset, m.Count));
     }
 
     [Fact]
@@ -163,14 +163,14 @@ public class McConfigTests : IDisposable
     [Theory]
     [InlineData("device = \"W\"", "device = \"Q\"", "server.map device value \"Q\" is invalid")]
     [InlineData("device = \"W\"", "device = \"W100\"", "server.map device value \"W100\" is invalid")]
-    [InlineData("kind = \"input\"", "kind = \"coil\"", "server.map kind value \"coil\" does not match the word device W")]
-    [InlineData("kind = \"input\"", "kind = \"regs\"", "server.map kind value \"regs\" is invalid")]
-    [InlineData("offset = 10", "offset = 90", "server.map W offset 90 (+20 cells) exceeds device \"plc1\" input length 100")]
+    [InlineData("kind = \"read_only_words\"", "kind = \"bits\"", "server.map kind value \"bits\" does not match the word device W")]
+    [InlineData("kind = \"read_only_words\"", "kind = \"regs\"", "server.map kind value \"regs\" is invalid")]
+    [InlineData("offset = 10", "offset = 90", "server.map W offset 90 (+20 cells) exceeds device \"plc1\" read_only_words length 100")]
     [InlineData("offset = 10", "offset = 100", "server.map W offset 100 (+20 cells) exceeds device")]
     [InlineData("offset = 10\ncount = 20", "offset = 100", "server.map W offset 100 (+0 cells) exceeds device")]
     [InlineData("count = 20", "count = 0", "server.map count value 0 is out of range")]
     [InlineData("offset = 10", "offset = -1", "server.map offset value -1 is out of range")]
-    [InlineData("count = 20", "count = 20\n\n[[server.map]]\ndevice = \"w\"\nkind = \"holding\"\noffset = 0", "duplicate server.map device \"W\"")]
+    [InlineData("count = 20", "count = 20\n\n[[server.map]]\ndevice = \"w\"\nkind = \"words\"\noffset = 0", "duplicate server.map device \"W\"")]
     [InlineData("protocol = \"mc-3e\"", "protocol = \"modbus-tcp\"", "server.map is only valid for mc-3e and fins servers")]
     [InlineData("port = 5000", "port = 5000\nserial_port = \"COM1\"", "server.serial_port is only valid for serial protocols")]
     public void McServer_InvalidMap_Fails(string find, string replace, string why)

@@ -240,7 +240,7 @@ public sealed class ClientPoller : IProtocolRunner
     /// <summary>
     /// Mirror a poll result into the local device (one Mirror ⇒ one
     /// DeviceChange / variable log line). Mirror, not Write: the local table
-    /// may be a read-only one (discrete/input). Watch callbacks run
+    /// may be a read-only one (read_only_bits/read_only_words). Watch callbacks run
     /// synchronously on this thread: it is marked so the push watchers can
     /// tell this write from a script/server write.
     /// </summary>

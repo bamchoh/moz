@@ -49,7 +49,7 @@ public class ModbusPduTests
     public void FC03_ReadHolding_Seeded()
     {
         var device = new Device("t");
-        device.Seed(TableKind.HoldingRegister, 0, Words(0x1234, 0xABCD));
+        device.Seed(TableKind.Words, 0, Words(0x1234, 0xABCD));
         var (resp, exc) = Run("0300000002", device);
         Assert.Equal("03041234ABCD", resp);
         Assert.Equal(0, exc);
@@ -59,7 +59,7 @@ public class ModbusPduTests
     public void FC03_AtOffset()
     {
         var device = new Device("t");
-        device.Seed(TableKind.HoldingRegister, 0, Words(9, 8, 7));
+        device.Seed(TableKind.Words, 0, Words(9, 8, 7));
         var (resp, _) = Run("0300010002", device); // addr=1 qty=2
         Assert.Equal("030400080007", resp);
     }
@@ -73,7 +73,7 @@ public class ModbusPduTests
     [InlineData("0900000001", "8901")]  // unknown FC 0x09
     public void Exceptions_Matrix(string req, string expected)
     {
-        var (resp, exc) = Run(req, new Device("t", holdingRegisters: 10));
+        var (resp, exc) = Run(req, new Device("t", words: 10));
         Assert.Equal(expected, resp);
         byte expectedExc = expected[3] == '2' ? (byte)2 : expected[3] == '3' ? (byte)3 : (byte)1;
         Assert.Equal(expectedExc, exc);
@@ -90,16 +90,16 @@ public class ModbusPduTests
     public void FC04_Seeded()
     {
         var device = new Device("t");
-        device.Seed(TableKind.InputRegister, 0, Words(0xBEEF));
+        device.Seed(TableKind.ReadOnlyWords, 0, Words(0xBEEF));
         Assert.Equal("0402BEEF", Run("0400000001", device).Response);
     }
 
     [Fact]
     public void FC03_Boundary_125OK_126Fails()
     {
-        var (resp, _) = Run("030000007D", new Device("t", holdingRegisters: 125));
+        var (resp, _) = Run("030000007D", new Device("t", words: 125));
         Assert.Equal("03FA", resp[..4]);
-        var (bad, exc) = Run("030000007E", new Device("t", holdingRegisters: 125));
+        var (bad, exc) = Run("030000007E", new Device("t", words: 125));
         Assert.Equal("8303", bad);
         Assert.Equal((byte)3, exc);
     }
@@ -110,16 +110,16 @@ public class ModbusPduTests
     public void FC01_ReadCoils_Packed()
     {
         var device = new Device("t");
-        device.WriteBit(TableKind.Coil, 0, true);
-        device.WriteBit(TableKind.Coil, 9, true); // second byte, bit 1
-        // coils: bit0=1 → byte0 %00000001 = 0x01; bit9=1 → byte1 = 0x02
+        device.WriteBit(TableKind.Bits, 0, true);
+        device.WriteBit(TableKind.Bits, 9, true); // second byte, bit 1
+        // bits: bit0=1 → byte0 %00000001 = 0x01; bit9=1 → byte1 = 0x02
         Assert.Equal("01020102", Run("010000000A", device).Response);
     }
 
     [Fact]
     public void FC01_Boundary_2000OK_2001Fails()
     {
-        var device = new Device("t", coils: 2000);
+        var device = new Device("t", bits: 2000);
         var (resp, _) = Run("01000007D0", device);
         Assert.Equal("01FA", resp[..4]);
         var (bad, _) = Run("01000007D1", device);
@@ -129,15 +129,15 @@ public class ModbusPduTests
     [Fact]
     public void FC02_SeededDiscrete()
     {
-        var device = new Device("t", discreteInputs: 10);
-        device.Seed(TableKind.DiscreteInput, 0, (bool[])[true, false, true]);
+        var device = new Device("t", readOnlyBits: 10);
+        device.Seed(TableKind.ReadOnlyBits, 0, (bool[])[true, false, true]);
         Assert.Equal("020105", Run("0200000003", device).Response);
     }
 
     [Fact]
     public void FC02_BeyondRange()
     {
-        var device = new Device("t", discreteInputs: 10);
+        var device = new Device("t", readOnlyBits: 10);
         Assert.Equal("8202", Run("02000A0001", device).Response);
     }
 
@@ -150,8 +150,8 @@ public class ModbusPduTests
         var (resp, exc) = Run("050005FF00", device);
         Assert.Equal("050005FF00", resp);
         Assert.Equal(0, exc);
-        Assert.True(device.ReadBit(TableKind.Coil, 5));
-        Assert.False(device.ReadBit(TableKind.Coil, 6));
+        Assert.True(device.ReadBit(TableKind.Bits, 5));
+        Assert.False(device.ReadBit(TableKind.Bits, 6));
     }
 
     [Theory]
@@ -160,7 +160,7 @@ public class ModbusPduTests
     [InlineData("05", "8503")]          // truncated
     public void FC05_Exceptions(string req, string expected)
     {
-        Assert.Equal(expected, Run(req, new Device("t", coils: 32)).Response);
+        Assert.Equal(expected, Run(req, new Device("t", bits: 32)).Response);
     }
 
     [Fact]
@@ -175,7 +175,7 @@ public class ModbusPduTests
     private static ushort ReadWord(Device device, int index)
     {
         Span<ushort> w = stackalloc ushort[1];
-        device.Read(TableKind.HoldingRegister, index, w);
+        device.Read(TableKind.Words, index, w);
         return w[0];
     }
 
@@ -184,7 +184,7 @@ public class ModbusPduTests
     [InlineData("06FFFF", "8603")]
     public void FC06_Exceptions(string req, string expected)
     {
-        Assert.Equal(expected, Run(req, new Device("t", holdingRegisters: 1)).Response);
+        Assert.Equal(expected, Run(req, new Device("t", words: 1)).Response);
     }
 
     // --- FC15/FC16 multiple writes ----------------------------------------------
@@ -192,28 +192,28 @@ public class ModbusPduTests
     [Fact]
     public void FC15_WriteMultipleCoils_LSBFirst()
     {
-        var device = new Device("t", coils: 32);
+        var device = new Device("t", bits: 32);
         var (resp, _) = Run("0F0000000A02FF03", device); // addr0 qty10, bytes FF 03
         Assert.Equal("0F0000000A", resp);
         for (int i = 0; i < 10; i++)
         {
-            Assert.True(device.ReadBit(TableKind.Coil, i));
+            Assert.True(device.ReadBit(TableKind.Bits, i));
         }
-        Assert.False(device.ReadBit(TableKind.Coil, 10));
+        Assert.False(device.ReadBit(TableKind.Bits, 10));
     }
 
     [Fact]
     public void FC15_UnwrittenCoilsOutsideQtyKeepValue()
     {
-        var device = new Device("t", coils: 32);
-        device.WriteBit(TableKind.Coil, 5, true);
+        var device = new Device("t", bits: 32);
+        device.WriteBit(TableKind.Bits, 5, true);
         var (r1, _) = Run("0F0000000801FF", device); // write coils 0..7 = true (qty=8)
         Assert.Equal("0F00000008", r1);
-        Assert.True(device.ReadBit(TableKind.Coil, 5));       // within qty: set
+        Assert.True(device.ReadBit(TableKind.Bits, 5));       // within qty: set
         var (r2, _) = Run("0F000000010100", device);          // write coil 0..1 = false
         Assert.Equal("0F00000001", r2);
-        Assert.True(device.ReadBit(TableKind.Coil, 5));       // outside qty: kept
-        Assert.False(device.ReadBit(TableKind.Coil, 0));
+        Assert.True(device.ReadBit(TableKind.Bits, 5));       // outside qty: kept
+        Assert.False(device.ReadBit(TableKind.Bits, 0));
     }
 
     [Theory]
@@ -225,14 +225,14 @@ public class ModbusPduTests
     [InlineData("0F", "8F03")]               // truncated
     public void FC15_Exceptions(string req, string expected)
     {
-        Assert.Equal(expected, Run(req, new Device("t", coils: 32)).Response);
+        Assert.Equal(expected, Run(req, new Device("t", bits: 32)).Response);
     }
 
     [Fact]
     public void FC15_Boundary_1968OK()
     {
         var req = "0F000007B0F6" + new string('F', 492); // qty=1968 (0x7B0), byteCount=246
-        var (resp, _) = Run(req, new Device("t", coils: 2000));
+        var (resp, _) = Run(req, new Device("t", bits: 2000));
         Assert.Equal("0F000007B0", resp);
     }
 
@@ -240,7 +240,7 @@ public class ModbusPduTests
     public void FC15_Boundary_1969Fails()
     {
         var req = "0F000007B1F7" + new string('F', 494); // qty=1969 (0x7B1) > 1968
-        Assert.Equal("8F03", Run(req, new Device("t", coils: 2000)).Response);
+        Assert.Equal("8F03", Run(req, new Device("t", bits: 2000)).Response);
     }
 
     [Fact]
@@ -261,16 +261,16 @@ public class ModbusPduTests
     [InlineData("10", "9003")]                   // truncated
     public void FC16_Exceptions(string req, string expected)
     {
-        Assert.Equal(expected, Run(req, new Device("t", holdingRegisters: 1)).Response);
+        Assert.Equal(expected, Run(req, new Device("t", words: 1)).Response);
     }
 
     [Fact]
     public void FC16_Boundary_123OK_124Fails()
     {
         var req = "100000007BF6" + new string('7', 492); // qty=123, byteCount=246
-        Assert.Equal("100000007B", Run(req, new Device("t", holdingRegisters: 200)).Response);
+        Assert.Equal("100000007B", Run(req, new Device("t", words: 200)).Response);
         var bad = "100000007C F7" + new string('7', 494);
-        Assert.Equal("9003", Run(bad, new Device("t", holdingRegisters: 200)).Response);
+        Assert.Equal("9003", Run(bad, new Device("t", words: 200)).Response);
     }
 
     [Fact]
@@ -284,7 +284,7 @@ public class ModbusPduTests
     {
         // addr = 0xFFF0, qty = 0x0010: naive int addition is safe, but a byte-level
         // overflow check must also reject addr+qty > length (device length small)
-        Assert.Equal("8302", Run("03FFF00010", new Device("t", holdingRegisters: 100)).Response);
+        Assert.Equal("8302", Run("03FFF00010", new Device("t", words: 100)).Response);
     }
 
     /// <summary>
@@ -295,7 +295,7 @@ public class ModbusPduTests
     public void ReadBits_ClearsStaleResponseBytes()
     {
         var device = new Device("t");
-        device.Seed(TableKind.DiscreteInput, 0, new[] { true, false, true });
+        device.Seed(TableKind.ReadOnlyBits, 0, new[] { true, false, true });
         var resp = new byte[300];
         Array.Fill(resp, (byte)0xBE); // leftovers of an earlier FC04 response
         var outcome = ModbusPdu.Handle(Hex("02 0000 0003"), device, resp);

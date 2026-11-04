@@ -25,8 +25,8 @@ public class FinsConfigTests : IDisposable
         """
         [[device]]
         name = "plc-a"
-        holding = 2000
-        input = 100
+        words = 2000
+        read_only_words = 100
 
         [[server]]
         name = "fins-a"
@@ -37,13 +37,13 @@ public class FinsConfigTests : IDisposable
 
         [[server.map]]
         device = "CIO"
-        kind = "holding"
+        kind = "words"
         offset = 1000
         count = 100
 
         [[server.map]]
         device = "e0"
-        kind = "input"
+        kind = "read_only_words"
         offset = 0
         """;
 
@@ -69,10 +69,10 @@ public class FinsConfigTests : IDisposable
     [InlineData("node = 10", "node = 0", "server.node value 0 is out of range 1..254")]
     [InlineData("node = 10", "node = 255", "server.node value 255 is out of range 1..254")]
     [InlineData("protocol = \"fins-tcp\"", "protocol = \"modbus-tcp\"", "server.node is only valid for fins servers")]
-    [InlineData("kind = \"holding\"", "kind = \"coil\"", "server.map kind value \"coil\" does not match the word device CIO (holding|input)")]
+    [InlineData("kind = \"words\"", "kind = \"bits\"", "server.map kind value \"bits\" does not match the word device CIO (words|read_only_words)")]
     [InlineData("device = \"CIO\"", "device = \"T\"", "server.map device value \"T\" is invalid (DM|CIO|W|H|A|E0..E18)")]
     [InlineData("device = \"e0\"", "device = \"cio\"", "duplicate server.map device \"CIO\"")]
-    [InlineData("count = 100", "count = 1001", "server.map CIO offset 1000 (+1001 cells) exceeds device \"plc-a\" holding length 2000")]
+    [InlineData("count = 100", "count = 1001", "server.map CIO offset 1000 (+1001 cells) exceeds device \"plc-a\" words length 2000")]
     public void Fins_InvalidConfig_Fails(string find, string replace, string why)
     {
         var r = Load("fins-bad.toml", Base.Replace(find, replace));

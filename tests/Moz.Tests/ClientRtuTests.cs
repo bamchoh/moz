@@ -24,8 +24,8 @@ public class ClientRtuTests
         var remote = TestServer.MakeDefaultDevice(); // holding 0..1 = 0x1234, 0xABCD; discrete [T,F,T]
         await using var bus = new SerialBus();
         await using var server = await RtuTestServer.Start(bus.SlaveStream, remote);
-        var local = new Device("local", holdingRegisters: 100, discreteInputs: 100);
-        PollEntry[] polls = [new(3, 0, 2, TableKind.HoldingRegister, 0), new(2, 0, 3, TableKind.DiscreteInput, 10)];
+        var local = new Device("local", words: 100, readOnlyBits: 100);
+        PollEntry[] polls = [new(3, 0, 2, TableKind.Words, 0), new(2, 0, 3, TableKind.ReadOnlyBits, 10)];
         var poller = new ClientPoller("p", new ModbusRemote("p", Link(bus), 1, polls, [], NullLogger.Instance), 50, local, NullLogger.Instance);
 
         using var cts = new CancellationTokenSource();
@@ -36,55 +36,55 @@ public class ClientRtuTests
         await task;
 
         var w = new ushort[2];
-        local.Read(TableKind.HoldingRegister, 0, w);
+        local.Read(TableKind.Words, 0, w);
         Assert.Equal([0x1234, 0xABCD], w);
-        Assert.True(local.ReadBit(TableKind.DiscreteInput, 10));
-        Assert.False(local.ReadBit(TableKind.DiscreteInput, 11));
-        Assert.True(local.ReadBit(TableKind.DiscreteInput, 12));
+        Assert.True(local.ReadBit(TableKind.ReadOnlyBits, 10));
+        Assert.False(local.ReadBit(TableKind.ReadOnlyBits, 11));
+        Assert.True(local.ReadBit(TableKind.ReadOnlyBits, 12));
     }
 
     [Fact]
     public async Task Push_WritesRemoteOverSerial()
     {
-        var remote = new Device("remote", coils: 100, holdingRegisters: 100);
+        var remote = new Device("remote", bits: 100, words: 100);
         await using var bus = new SerialBus();
         await using var server = await RtuTestServer.Start(bus.SlaveStream, remote);
-        var local = new Device("local", coils: 100, holdingRegisters: 100);
-        PushEntry[] pushes = [new(16, TableKind.HoldingRegister, 10, 2, 20), new(5, TableKind.Coil, 3, 1, 7)];
+        var local = new Device("local", bits: 100, words: 100);
+        PushEntry[] pushes = [new(16, TableKind.Words, 10, 2, 20), new(5, TableKind.Bits, 3, 1, 7)];
         var provider = new CapturingProvider();
         var poller = new ClientPoller("p", new ModbusRemote("p", Link(bus), 1, [], pushes, provider.CreateLogger("p")), 50, local, provider.CreateLogger("p"));
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
         await Task.Delay(100);
-        local.Write(TableKind.HoldingRegister, 10, new ushort[] { 0x1111, 0x2222 });
-        local.WriteBit(TableKind.Coil, 3, true);
+        local.Write(TableKind.Words, 10, new ushort[] { 0x1111, 0x2222 });
+        local.WriteBit(TableKind.Bits, 3, true);
         await Task.Delay(400);
         Assert.False(poller.HasPendingPush, string.Join("; ", provider.Entries.Select(e => e.Message)));
         await cts.CancelAsync();
         await task;
 
         var w = new ushort[2];
-        remote.Read(TableKind.HoldingRegister, 20, w);
+        remote.Read(TableKind.Words, 20, w);
         Assert.Equal([0x1111, 0x2222], w);
-        Assert.True(remote.ReadBit(TableKind.Coil, 7));
+        Assert.True(remote.ReadBit(TableKind.Bits, 7));
     }
 
     [Fact]
     public async Task SilentSlave_TimesOut_KeepsPushPending_ThenDelivers()
     {
-        var remote = new Device("remote", holdingRegisters: 100);
+        var remote = new Device("remote", words: 100);
         await using var bus = new SerialBus();
         var responder = new RtuResponder(bus.SlaveStream, remote) { Silent = true };
-        var local = new Device("local", holdingRegisters: 100);
+        var local = new Device("local", words: 100);
         var provider = new CapturingProvider();
-        PollEntry[] polls = [new(3, 0, 1, TableKind.HoldingRegister, 0)];
-        PushEntry[] pushes = [new(6, TableKind.HoldingRegister, 5, 1, 5)];
+        PollEntry[] polls = [new(3, 0, 1, TableKind.Words, 0)];
+        PushEntry[] pushes = [new(6, TableKind.Words, 5, 1, 5)];
         var poller = new ClientPoller("p", new ModbusRemote("p", Link(bus, timeoutMs: 200), 1, polls, pushes, provider.CreateLogger("p")), 100, local, provider.CreateLogger("p"));
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
-        local.Write(TableKind.HoldingRegister, 5, new ushort[] { 0x5A5A });
+        local.Write(TableKind.Words, 5, new ushort[] { 0x5A5A });
         await Task.Delay(500);
         Assert.False(poller.IsConnected); // nothing answered yet
         Assert.True(poller.HasPendingPush);
@@ -99,7 +99,7 @@ public class ClientRtuTests
         await responder.DisposeAsync();
 
         var w = new ushort[1];
-        remote.Read(TableKind.HoldingRegister, 5, w);
+        remote.Read(TableKind.Words, 5, w);
         Assert.Equal((ushort)0x5A5A, w[0]);
     }
 
@@ -109,8 +109,8 @@ public class ClientRtuTests
     [InlineData("truncated", "incomplete")]
     public async Task BadResponse_IsCommError_NextPollSucceeds(string kind, string logText)
     {
-        var remote = new Device("remote", holdingRegisters: 100);
-        remote.Seed(TableKind.HoldingRegister, 0, new ushort[] { 0x4242 });
+        var remote = new Device("remote", words: 100);
+        remote.Seed(TableKind.Words, 0, new ushort[] { 0x4242 });
         await using var bus = new SerialBus();
         int mangled = 0;
         var responder = new RtuResponder(bus.SlaveStream, remote)
@@ -133,9 +133,9 @@ public class ClientRtuTests
                 }
             },
         };
-        var local = new Device("local", holdingRegisters: 100);
+        var local = new Device("local", words: 100);
         var provider = new CapturingProvider();
-        PollEntry[] polls = [new(3, 0, 1, TableKind.HoldingRegister, 0)];
+        PollEntry[] polls = [new(3, 0, 1, TableKind.Words, 0)];
         var poller = new ClientPoller("p", new ModbusRemote("p", Link(bus), 1, polls, [], provider.CreateLogger("p")), 100, local, provider.CreateLogger("p"));
 
         using var cts = new CancellationTokenSource();
@@ -147,7 +147,7 @@ public class ClientRtuTests
 
         Assert.Contains(provider.Entries, e => e.EventId == Moz.Logging.CommLog.EventIds.ConnError.Id && e.Message.Contains(logText));
         var w = new ushort[1];
-        local.Read(TableKind.HoldingRegister, 0, w);
+        local.Read(TableKind.Words, 0, w);
         Assert.Equal((ushort)0x4242, w[0]); // the next poll on the same port worked
         Assert.True(mangled >= 2);
     }

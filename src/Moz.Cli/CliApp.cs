@@ -117,10 +117,10 @@ public static class CliApp
         {
             devices[d.Name] = new Device(
                 d.Name,
-                coils: d.Coils,
-                discreteInputs: d.Discrete,
-                holdingRegisters: d.Holding,
-                inputRegisters: d.Input);
+                bits: d.Bits,
+                readOnlyBits: d.ReadOnlyBits,
+                words: d.Words,
+                readOnlyWords: d.ReadOnlyWords);
         }
 
         // typed variable overlays (phase 3): per-device change logging +

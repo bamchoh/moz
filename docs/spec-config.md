@@ -17,13 +17,15 @@ file   = "moz.log"    # 任意。指定すると JSON lines でファイルに�
 
 ## [[device]] — シミュレート装置
 
+メモリは 4 テーブル: `bits` / `words` (読み書き) と `read_only_bits` / `read_only_words` (サーバ経由では書けない)。名前はプロトコル中立で、Modbus はコイル / 入力ステータス / 保持レジスタ / 入力レジスタを、MC と FINS はデバイス・エリアをこの 4 つに写す (フェーズ 20 で coils / discrete / holding / input から改名、旧名はエラー)。
+
 ```toml
 [[device]]
 name    = "plc-a"     # 必須、一意
-coils   = 65536       # Coil 領域の点数 (1..65536、省略: 65536)
-discrete = 65536      # Discrete Input 領域
-holding = 65536       # Holding Register 領域
-input   = 65536       # Input Register 領域
+bits   = 65536       # 読み書きできるビット領域の点数 (1..65536、省略: 65536)
+read_only_bits = 65536      # 読み取り専用ビット領域 (サーバ経由では書けない。スクリプト・変数・クライアントのミラーからは書ける)
+words = 65536       # 読み書きできるワード領域
+read_only_words   = 65536       # 読み取り専用ワード領域
 ```
 
 device は独立したメモリ空間。複数の server が同一 device を参照できる。
@@ -36,7 +38,7 @@ device は独立したメモリ空間。複数の server が同一 device を参
 [[variable]]
 name   = "temperature"
 device = "plc-a"     # 参照する device 名 (未宣言名はエラー)
-kind   = "holding"   # coil | discrete | holding | input
+kind   = "words"   # bits | read_only_bits | words | read_only_words
 offset = 0           # 0ベースの開始位置
 type   = "real"      # bool | int | uint | dint | udint | real | lint | ulint | string | time | tod | date | dt | 宣言済みの構造体名
 count  = 4           # 配列要素数 (省略: 1)
@@ -47,23 +49,23 @@ value  = [1.0, 2.0, 3.0, 4.0]  # 初期値 (省略可)。起動時にメモリ�
 - 型とサイズ（レジスタはビッグエンディアン）:
   | type | サイズ | 置ける kind | 値域 |
   |---|---|---|---|
-  | bool | 1 点 | coil, discrete | true/false |
-  | int | 1 ワード | holding, input | -32768..32767 |
-  | uint | 1 ワード | holding, input | 0..65535 |
-  | dint | 2 ワード | holding, input | 32bit 符号付き |
-  | udint | 2 ワード | holding, input | 32bit 符号なし |
-  | real | 2 ワード | holding, input | IEEE754 単精度 |
-  | lint | 4 ワード | holding, input | 64bit 符号付き (スクリプトでは BigInt) |
-  | ulint | 4 ワード | holding, input | 64bit 符号なし (スクリプトでは BigInt) |
-  | string | ceil(length/2) ワード | holding, input | UTF-8、各ワードの上位バイトが先頭の文字、余りは NUL 詰め。読取は最初の NUL で終了、不正な UTF-8 は U+FFFD。length バイトを超える書込みはエラー |
-  | time | 2 ワード | holding, input | int32 ミリ秒 (IEC TIME) |
-  | tod | 2 ワード | holding, input | uint32 ミリ秒、0 時からの経過 (TIME_OF_DAY) |
-  | date | 4 ワード | holding, input | uint64 秒、Unix epoch からの UTC 0 時の時刻 (DATE)。書込みは UTC 0 時へ切り捨て |
-  | dt | 4 ワード | holding, input | uint64 秒、Unix epoch からの経過 (DATE_AND_TIME) |
+  | bool | 1 点 | bits, read_only_bits | true/false |
+  | int | 1 ワード | words, read_only_words | -32768..32767 |
+  | uint | 1 ワード | words, read_only_words | 0..65535 |
+  | dint | 2 ワード | words, read_only_words | 32bit 符号付き |
+  | udint | 2 ワード | words, read_only_words | 32bit 符号なし |
+  | real | 2 ワード | words, read_only_words | IEEE754 単精度 |
+  | lint | 4 ワード | words, read_only_words | 64bit 符号付き (スクリプトでは BigInt) |
+  | ulint | 4 ワード | words, read_only_words | 64bit 符号なし (スクリプトでは BigInt) |
+  | string | ceil(length/2) ワード | words, read_only_words | UTF-8、各ワードの上位バイトが先頭の文字、余りは NUL 詰め。読取は最初の NUL で終了、不正な UTF-8 は U+FFFD。length バイトを超える書込みはエラー |
+  | time | 2 ワード | words, read_only_words | int32 ミリ秒 (IEC TIME) |
+  | tod | 2 ワード | words, read_only_words | uint32 ミリ秒、0 時からの経過 (TIME_OF_DAY) |
+  | date | 4 ワード | words, read_only_words | uint64 秒、Unix epoch からの UTC 0 時の時刻 (DATE)。書込みは UTC 0 時へ切り捨て |
+  | dt | 4 ワード | words, read_only_words | uint64 秒、Unix epoch からの経過 (DATE_AND_TIME) |
 - 時刻型のレジスタ配置は karakuri と同じ (time=int32, tod=uint32, date/dt=uint64)。変更ログは time/tod を整数 ms、date/dt を `2026-11-01T09:30:00Z` (ISO-8601 UTC、西暦 9999 年超は整数のまま)、string を `"..."` (`"` と `\` は `\` でエスケープ) で出力する
 - `count > 1` で配列。要素は offset, offset+1, ... に並ぶ (string は要素ごとに ceil(length/2) ワード)
 - `type` に `[[struct]]` で宣言した構造体名を書くと構造体変数になる (下記)
-- **初期値 `value`** (省略可): 起動時、どのサーバ・スクリプト・クライアントも動く前にメモリへ書き込まれる (変更ログは出ない)。省略した変数は 0 / false / 空文字列のまま。coil/discrete/holding/input のどのテーブルにも書ける (読み取り専用テーブルの「センサ値」を仕込む用途)
+- **初期値 `value`** (省略可): 起動時、どのサーバ・スクリプト・クライアントも動く前にメモリへ書き込まれる (変更ログは出ない)。省略した変数は 0 / false / 空文字列のまま。bits/read_only_bits/words/read_only_words のどのテーブルにも書ける (読み取り専用テーブルの「センサ値」を仕込む用途)
   - スカラ: TOML の値 1 つ。`count > 1` なら要素数ちょうどの配列 (`[1, 2, 3]`)
   - bool は `true`/`false`、整数型は TOML 整数 (`0xFFFF` も可) で型の値域内、real は整数か小数、string は length バイト (UTF-8) 以内
   - time/tod は整数ミリ秒、date/dt は TOML 日時 (`2026-11-01T09:00:00Z`; オフセット無しのローカル日時は UTC とみなす) か Unix epoch からの整数秒。date は 0 時 UTC へ切り捨て。1970 年より前はエラー
@@ -101,7 +103,7 @@ count = 4               # フィールド配列 (省略: 1)
 [[variable]]
 name   = "motor"
 device = "plc-a"
-kind   = "holding"      # 構造体は words | read_only_words のみ (coil/discrete はエラー)
+kind   = "words"      # 構造体は words | read_only_words のみ (bits/read_only_bits はエラー)
 offset = 100
 type   = "Motor"        # 語数 = 1 + 1 + 3 + 8 = 13
 count  = 2              # 構造体配列: 要素ごとに 13 ワードずつ並ぶ
@@ -156,12 +158,12 @@ port     = 5010          # 省略: 50200
 
 [[server.map]]           # MC デバイス → メモリの割り当て (省略可)
 device = "W"             # デバイスコードの英字だけ (D, M, X, Y, W, R, ZR, ...)
-kind   = "holding"       # coil|discrete|holding|input。ビットデバイスはビットテーブル、ワードデバイスはワードテーブル
-offset = 1000            # W0 ↔ holding[1000]
+kind   = "words"       # bits|read_only_bits|words|read_only_words。ビットデバイスはビットテーブル、ワードデバイスはワードテーブル
+offset = 1000            # W0 ↔ words[1000]
 count  = 100             # W0..W99 (省略: offset からテーブルの残り全部)
 ```
 
-- 既定の割り当て: `D → holding 0..`、`M → coil 0..`、`X → discrete 0..` (各テーブルの全長)。`[[server.map]]` に同じコードを書くと置き換わり、他の既定は残る。割り当てのないデバイスへの要求は終了コード C05B
+- 既定の割り当て: `D → words 0..`、`M → bits 0..`、`X → read_only_bits 0..` (各テーブルの全長)。`[[server.map]]` に同じコードを書くと置き換わり、他の既定は残る。割り当てのないデバイスへの要求は終了コード C05B
 - 検証: デバイスコードが既知、kind の種別がデバイスに一致、`offset + count` (count 省略時は残り全部、0 セルならエラー) がテーブル長以内、同じコードの重複、不明キー。`map` は mc-3e / fins 以外の protocol では設定禁止
 - `unit_ids` は MC には無く、無視される。終了コードやフレーム規則は docs/spec-mc.md
 
@@ -178,13 +180,13 @@ node     = 10            # fins-tcp のサーバノード 1..254 (省略: bind �
 
 [[server.map]]           # FINS エリア → メモリの割り当て (省略可)
 device = "CIO"           # DM | CIO | W | H | A | E0..E18 (EM バンク、16 進)
-kind   = "holding"       # words | read_only_words (エリアはワード構成なのでワードテーブルだけ)
-offset = 1000            # CIO 0 ↔ holding[1000]
+kind   = "words"       # words | read_only_words (エリアはワード構成なのでワードテーブルだけ)
+offset = 1000            # CIO 0 ↔ words[1000]
 count  = 100             # CIO 0..99 (省略: offset からテーブルの残り全部)
 ```
 
-- 既定の割り当ては `DM → holding 0..` (テーブル全長) だけ。他のエリアは `[[server.map]]` が無ければ終了コード 1101。ビットアクセス (`CIO 100.05`) は写し先ワードの中のビット
-- 検証: エリアが既知、`kind` が holding / input、範囲と重複は mc-3e と同じ。`node` は fins 以外の protocol では設定禁止、fins-udp では無視
+- 既定の割り当ては `DM → words 0..` (テーブル全長) だけ。他のエリアは `[[server.map]]` が無ければ終了コード 1101。ビットアクセス (`CIO 100.05`) は写し先ワードの中のビット
+- 検証: エリアが既知、`kind` が words / read_only_words、範囲と重複は mc-3e と同じ。`node` は fins 以外の protocol では設定禁止、fins-udp では無視
 - `unit_ids` は無視される。コマンド・終了コード・FINS/TCP の枠は docs/spec-fins.md
 
 ## [[client]] — クライアント (マスタ): リモートスレーブのミラー
@@ -217,12 +219,12 @@ timeout_ms  = 5000                # 1 要求あたりのタイムアウト (省�
 fc            = 3       # Modbus のみ: 読み取り FC 1..4 (省略: 3)
 remote_offset = 100     # Modbus のみ: リモートの開始アドレス (省略: 0)
 count         = 10      # 読み取り点数 (ワード FC: 1..125, ビット FC: 1..2000)
-local_kind    = "holding"  # 省略可: fc から推測 (fc1→coil, fc2→discrete, fc3→holding, fc4→input)
+local_kind    = "words"  # 省略可: fc から推測 (fc1→bits, fc2→read_only_bits, fc3→words, fc4→read_only_words)
 local_offset  = 0       # ローカル device の開始アドレス
 
 [[client.push]]
 fc            = 16      # Modbus のみ: 書き込み FC 5 | 6 | 15 | 16 (省略: 16)
-local_kind    = "holding"  # 省略可: fc から推測 (fc5/15→coil, fc6/16→holding)。discrete/input を読み取り元にしてもよい
+local_kind    = "words"  # 省略可: fc から推測 (fc5/15→bits, fc6/16→words)。read_only_bits/read_only_words を読み取り元にしてもよい
 local_offset  = 20      # ローカル device の開始アドレス (この範囲を監視する)
 count         = 2       # 点数 (fc5/6: 1 固定、fc15: 1..1968、fc16: 1..123)
 remote_offset = 20      # Modbus のみ: リモートの開始アドレス (省略: 0)
@@ -246,13 +248,13 @@ timeout_ms  = 1000      # 監視タイマにも使う (250ms 単位に丸め)
 [[client.poll]]
 remote       = "D100"   # デバイス表記: 英字コード + 先頭番号 (X/Y/B/W/SB/SW/DX/DY/ZR は 16 進)
 count        = 10       # 点数 (ワードデバイス 1..960、ビットデバイス 1..7168)
-local_kind   = "holding"   # 省略可: ビットデバイス→coil、ワードデバイス→holding。種別が合わないとエラー
+local_kind   = "words"   # 省略可: ビットデバイス→bits、ワードデバイス→words。種別が合わないとエラー
 local_offset = 0
 
 [[client.push]]
 remote       = "M0"
 count        = 16
-local_offset = 0        # local_kind 省略時 coil
+local_offset = 0        # local_kind 省略時 bits
 ```
 
 - `remote` は mc-3e では必須、Modbus では設定禁止。逆に `fc` / `remote_offset` / `remote_unit` は mc-3e では設定禁止。`network` 等のルーティングキーも mc-3e 以外では禁止
@@ -266,7 +268,7 @@ local_offset = 0        # local_kind 省略時 coil
 [[variable]]
 name = "ua-temperature"
 device = "plc-mirror"
-kind = "holding"
+kind = "words"
 offset = 70
 type = "real"
 
@@ -318,7 +320,7 @@ timeout_ms  = 1000        # 応答の先頭バイトを待つ時間 (スレー�
 
 poll (リモート → ローカル):
 
-- `local_kind` は fc と同じ大きさ (ビット/ワード) でなければエラー。例: リモートの holding をローカルの input として公開する等の用途で指定する
+- `local_kind` は fc と同じ大きさ (ビット/ワード) でなければエラー。例: リモートの words をローカルの read_only_words として公開する等の用途で指定する
 - ローカル範囲 (`local_offset` + `count`) は device の該当テーブル長に収まること (毎 tick 書き込む範囲なので `poll local_offset 0 (+10 cells) exceeds device ... length` で設定エラー)
 - ミラーは 1 回の poll につき 1 回の device 書き込み (= 1 つの変数変更イベント)
 - 接続・タイムアウト・例外応答・解析エラーはすべて WARN ログ 1 行で、次の tick は普通に動く。通信エラーがあってもプロセスは止まらない
@@ -332,7 +334,7 @@ push (ローカル → リモート):
 - 通信エラー (接続失敗・タイムアウト・不正応答・応答のアドレス/点数不一致) は WARN ログ 1 行、接続を切り、未送達のまま次 tick に再送する。リモートの例外応答は `exc=` 付きの Request ログ 1 行で、再送はしない (次のローカル変更で再試行)
 - 要求は `fc` で指定した形そのまま (fc5/6 は 1 点固定の単一書き込み、fc15/16 は複数書き込み)。IndexRange/部分書き込みはない
 - 検証: fc が 5|6|15|16、count が fc の上限内、`local_kind` のビット/ワード整合、ローカル範囲が device の長さに収まること (push は毎回ローカルを読むため `push local_offset 20 (+4 cells) exceeds device ... length` で設定エラー)、不明キー
-- `local_kind` が discrete/input (読み取り専用テーブル) でもよい: poll と同様、ミラーはプロセス内部の書込みとして読み取り専用テーブルにも届く (Modbus マスタからの書込みだけが拒否される)
+- `local_kind` が read_only_bits/read_only_words (読み取り専用テーブル) でもよい: poll と同様、ミラーはプロセス内部の書込みとして読み取り専用テーブルにも届く (Modbus マスタからの書込みだけが拒否される)
 
 ## 起動順
 
@@ -395,7 +397,7 @@ interval_ms = 500       # 100..3600000 (省略: 1000)
 | server.protocol | modbus-tcp / modbus-rtu / opcua / mc-3e / fins-tcp / fins-udp (他はエラー) |
 | server.map[].device | 既知の MC デバイスコード (英字のみ) / FINS エリア (DM, CIO, W, H, A, E0..E18)、同一 server 内で一意; mc-3e / fins 以外では map 自体が禁止 |
 | server.node | 1 .. 254 (fins-tcp / fins-udp のみ; 省略: bind の末尾オクテット) |
-| server.map[].kind | coil / discrete / holding / input (デバイスの種別と一致) |
+| server.map[].kind | bits / read_only_bits / words / read_only_words (デバイスの種別と一致) |
 | server.map[].offset + count | device の該当テーブル長以内 (count 省略時は残り全部、1 セル以上) |
 | server.anonymous | write / read / deny (opcua のみ; 省略: ユーザー無しなら write、ありなら deny) |
 | server.user[].name / password | 必須 (name は一意); opcua 以外では user 自体が禁止 |
@@ -432,8 +434,8 @@ file = "moz.log"
 
 [[device]]
 name = "plc-a"
-holding = 1000
-coils = 1000
+words = 1000
+bits = 1000
 
 [[server]]
 name = "sim-a"

@@ -27,7 +27,7 @@ public interface IDeviceAccess
     bool ReadBit(TableKind table, int index);
 
     /// <summary>
-    /// Write one bit cell. Writing a read-only (DiscreteInput/InputRegister)
+    /// Write one bit cell. Writing a read-only (ReadOnlyBits/ReadOnlyWords)
     /// table throws <see cref="InvalidOperationException"/> — that is a
     /// programming bug, and the PDU layer rejects it earlier (exception 02).
     /// </summary>

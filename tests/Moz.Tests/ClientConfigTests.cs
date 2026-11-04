@@ -93,12 +93,12 @@ public class ClientConfigTests : IDisposable
     {
         var result = Load("derived.toml", Base);
         Assert.True(result.Ok, string.Join("\n", result.Errors));
-        Assert.Equal("holding", result.Config!.Client[0].Poll[0].LocalKind);
+        Assert.Equal("words", result.Config!.Client[0].Poll[0].LocalKind);
     }
 
     [Theory]
-    [InlineData(1, "holding", "requires a bit local kind")]
-    [InlineData(3, "coil", "requires a word local kind")]
+    [InlineData(1, "words", "requires a bit local kind")]
+    [InlineData(3, "bits", "requires a word local kind")]
     public void LocalKind_Bitness_MustMatch_Fc(int fc, string localKind, string why)
     {
         var toml = Base.Replace("[[client.poll]]", $"[[client.poll]]\n        local_kind = \"{localKind}\"")
@@ -195,17 +195,17 @@ public class ClientConfigTests : IDisposable
         Assert.True(result.Ok, string.Join("\n", result.Errors));
         var push = Assert.Single(result.Config!.Client[0].Push);
         Assert.Equal(16, push.Fc);               // default: write multiple registers
-        Assert.Equal("holding", push.LocalKind); // derived from fc
+        Assert.Equal("words", push.LocalKind); // derived from fc
         Assert.Equal(20, push.LocalOffset);
         Assert.Equal(4, push.Count);
         Assert.Equal(200, push.RemoteOffset);
-        Assert.Equal(Moz.Devices.TableKind.HoldingRegister, push.EffectiveLocalTable());
+        Assert.Equal(Moz.Devices.TableKind.Words, push.EffectiveLocalTable());
     }
 
     [Theory]
-    [InlineData(5, "coil")]
-    [InlineData(15, "coil")]
-    [InlineData(6, "holding")]
+    [InlineData(5, "bits")]
+    [InlineData(15, "bits")]
+    [InlineData(6, "words")]
     public void Push_LocalKind_Derived_From_Fc(int fc, string kind)
     {
         var toml = PushBase.Replace("count = 4", $"fc = {fc}\n        count = 1");
@@ -240,8 +240,8 @@ public class ClientConfigTests : IDisposable
     }
 
     [Theory]
-    [InlineData(16, "coil", "word fc 16 requires a word local kind")]
-    [InlineData(15, "holding", "bit fc 15 requires a bit local kind")]
+    [InlineData(16, "bits", "word fc 16 requires a word local kind")]
+    [InlineData(15, "words", "bit fc 15 requires a bit local kind")]
     [InlineData(16, "nope", "push.local_kind value \"nope\" is invalid")]
     public void Push_LocalKind_Bitness_MustMatch_Fc(int fc, string kind, string why)
     {
@@ -254,10 +254,10 @@ public class ClientConfigTests : IDisposable
     [Fact]
     public void Push_LocalRange_MustFitDevice()
     {
-        var toml = PushBase.Replace("name = \"plc-mirror\"", "name = \"plc-mirror\"\n        holding = 22");
+        var toml = PushBase.Replace("name = \"plc-mirror\"", "name = \"plc-mirror\"\n        words = 22");
         var result = Load("pushrange.toml", toml);
         Assert.False(result.Ok);
-        Assert.Contains(result.Errors, e => e.Message.Contains("push local_offset 20 (+4 cells) exceeds device \"plc-mirror\" holding length 22"));
+        Assert.Contains(result.Errors, e => e.Message.Contains("push local_offset 20 (+4 cells) exceeds device \"plc-mirror\" words length 22"));
     }
 
     [Fact]
@@ -285,10 +285,10 @@ public class ClientConfigTests : IDisposable
     [Fact]
     public void Poll_LocalRange_MustFitDevice()
     {
-        var toml = Base.Replace("name = \"plc-mirror\"", "name = \"plc-mirror\"\n        holding = 8");
+        var toml = Base.Replace("name = \"plc-mirror\"", "name = \"plc-mirror\"\n        words = 8");
         var result = Load("pollrange.toml", toml); // poll: count 10 at local_offset 0
         Assert.False(result.Ok);
-        Assert.Contains(result.Errors, e => e.Message.Contains("poll local_offset 0 (+10 cells) exceeds device \"plc-mirror\" holding length 8"));
+        Assert.Contains(result.Errors, e => e.Message.Contains("poll local_offset 0 (+10 cells) exceeds device \"plc-mirror\" words length 8"));
     }
 
     // --- protocol = "modbus-rtu" (serial master) ----------------------------------------

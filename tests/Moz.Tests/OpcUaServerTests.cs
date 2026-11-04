@@ -57,25 +57,25 @@ public class OpcUaServerTests
         try
         {
             var port = (ushort)Math.Clamp(Interlocked.Increment(ref s_port), 48421, 48499);
-            var device = new Device("plc-ua", holdingRegisters: 100, coils: 100);
-            device.Seed(TableKind.HoldingRegister, 0, new ushort[] { 0x1234, 0xABCD });
+            var device = new Device("plc-ua", words: 100, bits: 100);
+            device.Seed(TableKind.Words, 0, new ushort[] { 0x1234, 0xABCD });
             var vars = new VariableTable(device,
             [
-                new Variable("temp", TableKind.HoldingRegister, 0, VariableType.Real),
-                new Variable("rpm", TableKind.HoldingRegister, 2, VariableType.Uint),
-                new Variable("pump", TableKind.Coil, 0, VariableType.Bool),
-                new Variable("pressure", TableKind.HoldingRegister, 4, VariableType.Int),
-                new Variable("total", TableKind.HoldingRegister, 6, VariableType.Dint),
-                new Variable("serial", TableKind.HoldingRegister, 8, VariableType.Ulint),
-                new Variable("big", TableKind.HoldingRegister, 12, VariableType.Lint),
-                new Variable("u32", TableKind.HoldingRegister, 16, VariableType.Udint),
-                new Variable("samples", TableKind.HoldingRegister, 20, VariableType.Int, Count: 3),
-                new Variable("flags", TableKind.Coil, 10, VariableType.Bool, Count: 2),
-                new Variable("label", TableKind.HoldingRegister, 24, VariableType.String, Length: 8),
-                new Variable("timer", TableKind.HoldingRegister, 28, VariableType.Time),
-                new Variable("stamp", TableKind.HoldingRegister, 30, VariableType.Dt),
-                .. VariableLayout.Expand("motor", TableKind.HoldingRegister, 34, "Motor", 1, 0, Structs),
-                .. VariableLayout.Expand("motors", TableKind.HoldingRegister, 38, "Motor", 2, 0, Structs),
+                new Variable("temp", TableKind.Words, 0, VariableType.Real),
+                new Variable("rpm", TableKind.Words, 2, VariableType.Uint),
+                new Variable("pump", TableKind.Bits, 0, VariableType.Bool),
+                new Variable("pressure", TableKind.Words, 4, VariableType.Int),
+                new Variable("total", TableKind.Words, 6, VariableType.Dint),
+                new Variable("serial", TableKind.Words, 8, VariableType.Ulint),
+                new Variable("big", TableKind.Words, 12, VariableType.Lint),
+                new Variable("u32", TableKind.Words, 16, VariableType.Udint),
+                new Variable("samples", TableKind.Words, 20, VariableType.Int, Count: 3),
+                new Variable("flags", TableKind.Bits, 10, VariableType.Bool, Count: 2),
+                new Variable("label", TableKind.Words, 24, VariableType.String, Length: 8),
+                new Variable("timer", TableKind.Words, 28, VariableType.Time),
+                new Variable("stamp", TableKind.Words, 30, VariableType.Dt),
+                .. VariableLayout.Expand("motor", TableKind.Words, 34, "Motor", 1, 0, Structs),
+                .. VariableLayout.Expand("motors", TableKind.Words, 38, "Motor", 2, 0, Structs),
             ], provider is null ? NullLogger.Instance : provider.CreateLogger("test"));
 
             var logger = provider is null ? NullLogger.Instance : provider.CreateLogger("test");

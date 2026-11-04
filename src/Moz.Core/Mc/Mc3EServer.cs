@@ -11,14 +11,14 @@ namespace Moz.Mc;
 public readonly record struct McMap(McDevice Device, TableKind Table, int Offset, int Count)
 {
     /// <summary>
-    /// The default map: D → holding registers, M → coils, X → discrete inputs,
+    /// The default map: D → words, M → bits, X → read-only bits,
     /// each from 0 over the whole table. Everything else needs [[server.map]].
     /// </summary>
     public static McMap[] Defaults(IDeviceAccess device) =>
     [
-        Whole(device, "D", TableKind.HoldingRegister),
-        Whole(device, "M", TableKind.Coil),
-        Whole(device, "X", TableKind.DiscreteInput),
+        Whole(device, "D", TableKind.Words),
+        Whole(device, "M", TableKind.Bits),
+        Whole(device, "X", TableKind.ReadOnlyBits),
     ];
 
     /// <summary>Defaults plus user maps; a user map for D/M/X replaces the default one.</summary>
@@ -168,7 +168,7 @@ public static class Mc3EServer
         {
             return Error(routing, body, EndLength, op, target, points);
         }
-        if (map.Table is TableKind.DiscreteInput or TableKind.InputRegister)
+        if (map.Table is TableKind.ReadOnlyBits or TableKind.ReadOnlyWords)
         {
             return Error(routing, body, EndContents, op, target, points); // read-only for peers, like Modbus
         }

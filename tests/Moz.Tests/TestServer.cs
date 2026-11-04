@@ -38,10 +38,10 @@ internal sealed class TestServer(Device device, ushort port, CancellationTokenSo
     /// <summary>The standard seeded device: known values so read tests need no setup.</summary>
     public static Device MakeDefaultDevice()
     {
-        var device = new Device("t", coils: 2000, discreteInputs: 2000, holdingRegisters: 200, inputRegisters: 200);
-        device.Seed(TableKind.HoldingRegister, 0, new ushort[] { 0x1234, 0xABCD });
-        device.Seed(TableKind.DiscreteInput, 0, new bool[] { true, false, true });
-        device.Seed(TableKind.InputRegister, 0, new ushort[] { 0xBEEF });
+        var device = new Device("t", bits: 2000, readOnlyBits: 2000, words: 200, readOnlyWords: 200);
+        device.Seed(TableKind.Words, 0, new ushort[] { 0x1234, 0xABCD });
+        device.Seed(TableKind.ReadOnlyBits, 0, new bool[] { true, false, true });
+        device.Seed(TableKind.ReadOnlyWords, 0, new ushort[] { 0xBEEF });
         return device;
     }
 

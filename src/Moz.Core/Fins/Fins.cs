@@ -95,11 +95,11 @@ public readonly record struct FinsArea(string Code, byte WordCode, byte BitCode)
 /// </summary>
 public readonly record struct FinsMap(FinsArea Area, TableKind Table, int Offset, int Count)
 {
-    /// <summary>The default map: DM → holding registers over the whole table. Every other area needs [[server.map]].</summary>
+    /// <summary>The default map: DM → words over the whole table. Every other area needs [[server.map]].</summary>
     public static FinsMap[] Defaults(IDeviceAccess device)
     {
         FinsArea.TryFromCode("DM", out var dm);
-        return [new FinsMap(dm, TableKind.HoldingRegister, 0, device.Length(TableKind.HoldingRegister))];
+        return [new FinsMap(dm, TableKind.Words, 0, device.Length(TableKind.Words))];
     }
 
     /// <summary>Defaults plus user maps; a user map for DM replaces the default one.</summary>
@@ -234,7 +234,7 @@ public static class FinsServer
         {
             return Error(header, command, Fins.EndRange, op, target, count, responseRequired);
         }
-        if (write && map.Table is TableKind.DiscreteInput or TableKind.InputRegister)
+        if (write && map.Table is TableKind.ReadOnlyBits or TableKind.ReadOnlyWords)
         {
             return Error(header, command, Fins.EndReadOnly, op, target, count, responseRequired);
         }

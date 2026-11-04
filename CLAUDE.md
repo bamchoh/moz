@@ -95,10 +95,12 @@ It is the shared integration boundary for protocol implementations and future co
 
 The memory model consists of four areas:
 
-- Coils
-- Discrete Inputs
-- Holding Registers
-- Input Registers
+- Bits (read-write)
+- ReadOnlyBits
+- Words (read-write)
+- ReadOnlyWords
+
+The names are protocol-neutral on purpose: Modbus maps coils / discrete inputs / holding registers / input registers onto them, MC and FINS map their devices and areas onto them. Do not reintroduce protocol vocabulary into the Devices layer.
 
 The `Watch` mechanism provides notifications of memory changes.
 

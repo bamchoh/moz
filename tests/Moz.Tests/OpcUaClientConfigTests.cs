@@ -25,7 +25,7 @@ public class OpcUaClientConfigTests : IDisposable
         """
         [[device]]
         name = "plc-mirror"
-        holding = 100
+        words = 100
 
         [[struct]]
         name = "Motor"
@@ -39,14 +39,14 @@ public class OpcUaClientConfigTests : IDisposable
         [[variable]]
         name = "temperature"
         device = "plc-mirror"
-        kind = "holding"
+        kind = "words"
         offset = 0
         type = "real"
 
         [[variable]]
         name = "motor"
         device = "plc-mirror"
-        kind = "holding"
+        kind = "words"
         offset = 10
         type = "Motor"
 
@@ -96,7 +96,7 @@ public class OpcUaClientConfigTests : IDisposable
     [InlineData("variable = \"temperature\"", "", "poll.variable is required")]
     [InlineData("variable = \"temperature\"", "variable = \"temperature\"\ncount = 2", "poll.count is only valid for modbus and mc-3e clients")]
     [InlineData("variable = \"temperature\"", "variable = \"temperature\"\nlocal_offset = 0", "poll.local_offset is only valid for modbus and mc-3e clients")]
-    [InlineData("variable = \"temperature\"", "variable = \"temperature\"\nlocal_kind = \"holding\"", "poll.local_kind is only valid for modbus and mc-3e clients")]
+    [InlineData("variable = \"temperature\"", "variable = \"temperature\"\nlocal_kind = \"words\"", "poll.local_kind is only valid for modbus and mc-3e clients")]
     [InlineData("variable = \"temperature\"", "variable = \"temperature\"\nfc = 3", "poll.fc is only valid for modbus")]
     [InlineData("variable = \"temperature\"", "variable = \"temperature\"\nremote = \"D1\"", "poll.remote is only valid for mc-3e")]
     [InlineData("variable = \"motor.speed\"", "variable = \"motor.rpm\"", "push.variable value \"motor.rpm\" is not declared")]
@@ -117,12 +117,12 @@ public class OpcUaClientConfigTests : IDisposable
             """
             [[device]]
             name = "plc-mirror"
-            holding = 100
+            words = 100
 
             [[variable]]
             name = "temperature"
             device = "plc-mirror"
-            kind = "holding"
+            kind = "words"
             offset = 0
             type = "real"
 
@@ -207,7 +207,7 @@ public class OpcUaClientConfigTests : IDisposable
             """
             [[device]]
             name = "plc-mirror"
-            holding = 100
+            words = 100
 
             [[client]]
             name = "p1"

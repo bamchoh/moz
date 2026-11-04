@@ -124,9 +124,9 @@ public static partial class ConfigLoader
         }
     }
 
-    /// <summary>Bit devices mirror into coils, word devices into holding registers; null for an unparseable device (reported by Validate).</summary>
+    /// <summary>Bit devices mirror into bits, word devices into words; null for an unparseable device (reported by Validate).</summary>
     private static string? McDefaultLocalKind(string? remote) =>
-        remote is not null && Mc.McDevice.TryParse(remote, out var device, out _) ? (device.IsBit ? "coil" : "holding") : null;
+        remote is not null && Mc.McDevice.TryParse(remote, out var device, out _) ? (device.IsBit ? "bits" : "words") : null;
 
     public static string DefaultConfigHint() =>
         "expected a [log] table, [[device]] tables, and [[server]] tables (see docs/spec-config.md)";
@@ -156,10 +156,10 @@ public static partial class ConfigLoader
         {
             Require(device.Name, $"device.name", path, errors, $"[[device]]");
             CheckExtra(device.Extra, $"[device \"{device.Name}\"]", path, errors);
-            CheckRange(device.Coils, "device.coils", 1, 65536, path, errors);
-            CheckRange(device.Discrete, "device.discrete", 1, 65536, path, errors);
-            CheckRange(device.Holding, "device.holding", 1, 65536, path, errors);
-            CheckRange(device.Input, "device.input", 1, 65536, path, errors);
+            CheckRange(device.Bits, "device.bits", 1, 65536, path, errors);
+            CheckRange(device.ReadOnlyBits, "device.read_only_bits", 1, 65536, path, errors);
+            CheckRange(device.Words, "device.words", 1, 65536, path, errors);
+            CheckRange(device.ReadOnlyWords, "device.read_only_words", 1, 65536, path, errors);
         }
 
         ValidateStructs(config, path, errors);
@@ -519,10 +519,10 @@ public static partial class ConfigLoader
         }
         int length = t switch
         {
-            TableKind.Coil => device.Coils,
-            TableKind.DiscreteInput => device.Discrete,
-            TableKind.HoldingRegister => device.Holding,
-            _ => device.Input,
+            TableKind.Bits => device.Bits,
+            TableKind.ReadOnlyBits => device.ReadOnlyBits,
+            TableKind.Words => device.Words,
+            _ => device.ReadOnlyWords,
         };
         if (offset + count > length)
         {
@@ -542,14 +542,14 @@ public static partial class ConfigLoader
         if (!LocalKinds.TryParse(kind, out var table))
         {
             errors.Add(new ConfigError(path,
-                $"{key}.local_kind value \"{kind}\" is invalid (coil|discrete|holding|input) in {ctx}"));
+                $"{key}.local_kind value \"{kind}\" is invalid (bits|read_only_bits|words|read_only_words) in {ctx}"));
             return null;
         }
         if (table.IsBit() != isBit)
         {
             errors.Add(new ConfigError(path, isBit
-                ? $"bit fc {fc} requires a bit local kind (coil|discrete) in {ctx}"
-                : $"word fc {fc} requires a word local kind (holding|input) in {ctx}"));
+                ? $"bit fc {fc} requires a bit local kind (bits|read_only_bits) in {ctx}"
+                : $"word fc {fc} requires a word local kind (words|read_only_words) in {ctx}"));
             return null;
         }
         return table;
@@ -739,14 +739,14 @@ public static partial class ConfigLoader
         }
         if (!LocalKinds.TryParse(localKind, out var table))
         {
-            errors.Add(new ConfigError(path, $"{key}.local_kind value \"{localKind}\" is invalid (coil|discrete|holding|input) in {ctx}"));
+            errors.Add(new ConfigError(path, $"{key}.local_kind value \"{localKind}\" is invalid (bits|read_only_bits|words|read_only_words) in {ctx}"));
             return null;
         }
         if (table.IsBit() != device.IsBit)
         {
             errors.Add(new ConfigError(path, device.IsBit
-                ? $"{key}.local_kind value \"{localKind}\" does not match the bit device {device.Code} (coil|discrete) in {ctx}"
-                : $"{key}.local_kind value \"{localKind}\" does not match the word device {device.Code} (holding|input) in {ctx}"));
+                ? $"{key}.local_kind value \"{localKind}\" does not match the bit device {device.Code} (bits|read_only_bits) in {ctx}"
+                : $"{key}.local_kind value \"{localKind}\" does not match the word device {device.Code} (words|read_only_words) in {ctx}"));
             return null;
         }
         return table;
@@ -832,14 +832,14 @@ public static partial class ConfigLoader
             }
             if (!LocalKinds.TryParse(map.Kind, out var table))
             {
-                errors.Add(new ConfigError(path, $"server.map kind value \"{map.Kind}\" is invalid (coil|discrete|holding|input) in {ctx}"));
+                errors.Add(new ConfigError(path, $"server.map kind value \"{map.Kind}\" is invalid (bits|read_only_bits|words|read_only_words) in {ctx}"));
                 continue;
             }
             if (table.IsBit() != dev.IsBit)
             {
                 errors.Add(new ConfigError(path, dev.IsBit
-                    ? $"server.map kind value \"{map.Kind}\" does not match the bit device {dev.Code} (coil|discrete) in {ctx}"
-                    : $"server.map kind value \"{map.Kind}\" does not match the word device {dev.Code} (holding|input) in {ctx}"));
+                    ? $"server.map kind value \"{map.Kind}\" does not match the bit device {dev.Code} (bits|read_only_bits) in {ctx}"
+                    : $"server.map kind value \"{map.Kind}\" does not match the word device {dev.Code} (words|read_only_words) in {ctx}"));
                 continue;
             }
             if (device is null || map.Offset < 0 || map.Count is < 1)
@@ -848,10 +848,10 @@ public static partial class ConfigLoader
             }
             int length = table switch
             {
-                TableKind.Coil => device.Coils,
-                TableKind.DiscreteInput => device.Discrete,
-                TableKind.HoldingRegister => device.Holding,
-                _ => device.Input,
+                TableKind.Bits => device.Bits,
+                TableKind.ReadOnlyBits => device.ReadOnlyBits,
+                TableKind.Words => device.Words,
+                _ => device.ReadOnlyWords,
             };
             int cells = map.Count ?? Math.Max(0, length - map.Offset);
             if (map.Offset + cells > length || cells == 0)

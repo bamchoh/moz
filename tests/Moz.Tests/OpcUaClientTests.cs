@@ -36,14 +36,14 @@ public class OpcUaClientTests
         try
         {
             var port = (ushort)Math.Clamp(Interlocked.Increment(ref s_port), 48521, 48599);
-            var device = new Device("plc-ua", holdingRegisters: 100, coils: 100);
+            var device = new Device("plc-ua", words: 100, bits: 100);
             var vars = new VariableTable(device,
             [
-                new Variable("temp", TableKind.HoldingRegister, 0, VariableType.Real),
-                new Variable("rpm", TableKind.HoldingRegister, 2, VariableType.Uint),
-                new Variable("pump", TableKind.Coil, 0, VariableType.Bool),
-                new Variable("samples", TableKind.HoldingRegister, 20, VariableType.Int, Count: 3),
-                new Variable("label", TableKind.HoldingRegister, 24, VariableType.String, Length: 8),
+                new Variable("temp", TableKind.Words, 0, VariableType.Real),
+                new Variable("rpm", TableKind.Words, 2, VariableType.Uint),
+                new Variable("pump", TableKind.Bits, 0, VariableType.Bool),
+                new Variable("samples", TableKind.Words, 20, VariableType.Int, Count: 3),
+                new Variable("label", TableKind.Words, 24, VariableType.String, Length: 8),
             ], NullLogger.Instance);
             var runner = new OpcUaServerRunner("ua-test", $"opc.tcp://127.0.0.1:{port}", device, vars, NullLogger.Instance);
             var cts = new CancellationTokenSource();
@@ -57,16 +57,16 @@ public class OpcUaClientTests
         }
     }
 
-    private static readonly Variable Temperature = new("temperature", TableKind.HoldingRegister, 10, VariableType.Real);
-    private static readonly Variable Speed = new("speed", TableKind.HoldingRegister, 20, VariableType.Uint);
-    private static readonly Variable Pump = new("pump", TableKind.Coil, 3, VariableType.Bool);
-    private static readonly Variable Samples = new("samples", TableKind.HoldingRegister, 30, VariableType.Int, Count: 3);
-    private static readonly Variable Label = new("label", TableKind.HoldingRegister, 40, VariableType.String, Length: 8);
-    private static readonly Variable WrongUint = new("wrong", TableKind.HoldingRegister, 50, VariableType.Uint);
+    private static readonly Variable Temperature = new("temperature", TableKind.Words, 10, VariableType.Real);
+    private static readonly Variable Speed = new("speed", TableKind.Words, 20, VariableType.Uint);
+    private static readonly Variable Pump = new("pump", TableKind.Bits, 3, VariableType.Bool);
+    private static readonly Variable Samples = new("samples", TableKind.Words, 30, VariableType.Int, Count: 3);
+    private static readonly Variable Label = new("label", TableKind.Words, 40, VariableType.String, Length: 8);
+    private static readonly Variable WrongUint = new("wrong", TableKind.Words, 50, VariableType.Uint);
 
     private static (Device Device, VariableTable Vars) LocalDevice()
     {
-        var device = new Device("local", holdingRegisters: 100, coils: 16);
+        var device = new Device("local", words: 100, bits: 16);
         return (device, new VariableTable(device, [Temperature, Speed, Pump, Samples, Label, WrongUint], NullLogger.Instance));
     }
 

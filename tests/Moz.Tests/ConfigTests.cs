@@ -28,7 +28,7 @@ public class ConfigTests : IDisposable
         """
         [[device]]
         name = "plc1"
-        coils = 100
+        bits = 100
 
         [[server]]
         name = "sim-a"
@@ -45,7 +45,7 @@ public class ConfigTests : IDisposable
         Assert.Single(result.Config!.Device);
         Assert.Single(result.Config.Server);
         Assert.Equal(50200, result.Config.Server[0].Port);
-        Assert.Equal(100, result.Config.Device[0].Coils);
+        Assert.Equal(100, result.Config.Device[0].Bits);
     }
 
     [Fact]
@@ -55,7 +55,7 @@ public class ConfigTests : IDisposable
         var server = result.Config!.Server[0];
         Assert.Equal("127.0.0.1", server.Bind);
         Assert.Null(server.UnitIds); // any unit id
-        Assert.Equal(65536, result.Config.Device[0].Holding);
+        Assert.Equal(65536, result.Config.Device[0].Words);
     }
 
     [Fact]
@@ -139,10 +139,10 @@ public class ConfigTests : IDisposable
     [Fact]
     public void DeviceSizes_RangeChecked()
     {
-        var toml = ValidT.Replace("coils = 100", "coils = 0");
+        var toml = ValidT.Replace("bits = 100", "bits = 0");
         var result = ConfigLoader.Load(WriteFile("sizes.toml", toml));
         Assert.False(result.Ok);
-        Assert.Contains(result.Errors, e => e.Message.Contains("coils value 0"));
+        Assert.Contains(result.Errors, e => e.Message.Contains("bits value 0"));
     }
 
     [Fact]

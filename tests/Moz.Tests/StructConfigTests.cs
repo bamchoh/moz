@@ -28,7 +28,7 @@ public class StructConfigTests : IDisposable
         """
         [[device]]
         name = "plc1"
-        holding = 100
+        words = 100
 
         [[struct]]
         name = "Motor"
@@ -84,7 +84,7 @@ public class StructConfigTests : IDisposable
     // --- validation ------------------------------------------------------------------
 
     private const string MotorVar =
-        "\n[[variable]]\nname = \"motor\"\ndevice = \"plc1\"\nkind = \"holding\"\noffset = 0\ntype = \"Motor\"\n";
+        "\n[[variable]]\nname = \"motor\"\ndevice = \"plc1\"\nkind = \"words\"\noffset = 0\ntype = \"Motor\"\n";
 
     [Fact]
     public void StructVariable_Loads_And_ToStructDefs()
@@ -226,9 +226,9 @@ public class StructConfigTests : IDisposable
     [Fact]
     public void StructVariable_OnBitTable_Fails()
     {
-        var result = Load("coil.toml", TwoStructs + MotorVar.Replace("kind = \"holding\"", "kind = \"coil\""));
+        var result = Load("coil.toml", TwoStructs + MotorVar.Replace("kind = \"words\"", "kind = \"bits\""));
         Assert.False(result.Ok);
-        Assert.Contains(result.Errors, e => e.Message.Contains("type \"Motor\" requires kind holding|input"));
+        Assert.Contains(result.Errors, e => e.Message.Contains("type \"Motor\" requires kind words|read_only_words"));
     }
 
     [Fact]
@@ -252,7 +252,7 @@ public class StructConfigTests : IDisposable
     [Fact]
     public void StructVariable_Overlap_UsesExpandedCells()
     {
-        var other = "\n[[variable]]\nname = \"x\"\ndevice = \"plc1\"\nkind = \"holding\"\noffset = 3\ntype = \"int\"\n";
+        var other = "\n[[variable]]\nname = \"x\"\ndevice = \"plc1\"\nkind = \"words\"\noffset = 3\ntype = \"int\"\n";
         var result = Load("overlap.toml", TwoStructs + MotorVar + other);
         Assert.False(result.Ok);
         Assert.Contains(result.Errors, e => e.Message.Contains("overlaps \"motor\" (offset 0, 4 cells)"));
@@ -261,7 +261,7 @@ public class StructConfigTests : IDisposable
     [Fact]
     public void ExpandedLeafName_Collision_Fails()
     {
-        var other = "\n[[variable]]\nname = \"motor.speed\"\ndevice = \"plc1\"\nkind = \"holding\"\noffset = 50\ntype = \"int\"\n";
+        var other = "\n[[variable]]\nname = \"motor.speed\"\ndevice = \"plc1\"\nkind = \"words\"\noffset = 50\ntype = \"int\"\n";
         var result = Load("leafdup.toml", TwoStructs + MotorVar + other);
         Assert.False(result.Ok);
         Assert.Contains(result.Errors, e => e.Message.Contains("duplicate variable name \"motor.speed\""));

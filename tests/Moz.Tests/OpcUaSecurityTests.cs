@@ -35,8 +35,8 @@ public class OpcUaSecurityTests
         {
             var port = (ushort)Math.Clamp(Interlocked.Increment(ref s_port), 48721, 48799);
             var pki = options.Pki ?? Path.Combine(Path.GetTempPath(), "moz-uasec-" + Guid.NewGuid().ToString("N"));
-            var device = new Device("plc-ua", holdingRegisters: 100, coils: 100);
-            var vars = new VariableTable(device, [new Variable("temp", TableKind.HoldingRegister, 0, VariableType.Real)], NullLogger.Instance);
+            var device = new Device("plc-ua", words: 100, bits: 100);
+            var vars = new VariableTable(device, [new Variable("temp", TableKind.Words, 0, VariableType.Real)], NullLogger.Instance);
             var runner = new OpcUaServerRunner("ua-sec", $"opc.tcp://127.0.0.1:{port}", device, vars, NullLogger.Instance, options with { Pki = pki });
             var cts = new CancellationTokenSource();
             var run = runner.RunAsync(cts.Token);
@@ -109,9 +109,9 @@ public class OpcUaSecurityTests
         };
         await using var server = await StartAsync(options);
         server.Variables.Write("temp", 12.5f);
-        var local = new Device("local", holdingRegisters: 32);
-        var mirror = new Variable("mirror", TableKind.HoldingRegister, 0, VariableType.Real);
-        var setpoint = new Variable("setpoint", TableKind.HoldingRegister, 4, VariableType.Real);
+        var local = new Device("local", words: 32);
+        var mirror = new Variable("mirror", TableKind.Words, 0, VariableType.Real);
+        var setpoint = new Variable("setpoint", TableKind.Words, 4, VariableType.Real);
         var vars = new VariableTable(local, [mirror, setpoint], NullLogger.Instance);
         var provider = new CapturingProvider();
         var remote = new OpcUaRemote("ua", server.Endpoint, 5000,
@@ -138,8 +138,8 @@ public class OpcUaSecurityTests
     public async Task MozClient_None_AgainstSecureServer_LogsNoEndpoint()
     {
         await using var server = await StartAsync(Secure);
-        var local = new Device("local", holdingRegisters: 32);
-        var mirror = new Variable("mirror", TableKind.HoldingRegister, 0, VariableType.Real);
+        var local = new Device("local", words: 32);
+        var mirror = new Variable("mirror", TableKind.Words, 0, VariableType.Real);
         var provider = new CapturingProvider();
         var remote = new OpcUaRemote("ua", server.Endpoint, 2000,
             [new OpcUaEntry(ExpandedNodeId.Parse("nsu=urn:moz:ua:ns;s=temp"), mirror)], [], provider.CreateLogger("ua"));
@@ -249,8 +249,8 @@ public class OpcUaSecurityTests
     {
         await using var server = await StartAsync(Ua105Policies);
         server.Variables.Write("temp", 43.0f);
-        var local = new Device("local", holdingRegisters: 32);
-        var mirror = new Variable("mirror", TableKind.HoldingRegister, 0, VariableType.Real);
+        var local = new Device("local", words: 32);
+        var mirror = new Variable("mirror", TableKind.Words, 0, VariableType.Real);
         var vars = new VariableTable(local, [mirror], NullLogger.Instance);
         var provider = new CapturingProvider();
         var remote = new OpcUaRemote("ua105", server.Endpoint, 5000,
@@ -307,8 +307,8 @@ public class OpcUaSecurityTests
     {
         await using var server = await StartAsync(ManyPolicies);
         server.Variables.Write("temp", 42.0f);
-        var local = new Device("local", holdingRegisters: 32);
-        var mirror = new Variable("mirror", TableKind.HoldingRegister, 0, VariableType.Real);
+        var local = new Device("local", words: 32);
+        var mirror = new Variable("mirror", TableKind.Words, 0, VariableType.Real);
         var vars = new VariableTable(local, [mirror], NullLogger.Instance);
         var provider = new CapturingProvider();
         var remote = new OpcUaRemote("ua", server.Endpoint, 5000,

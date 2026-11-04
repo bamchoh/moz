@@ -162,8 +162,8 @@ public class RtuTests
     [Fact]
     public async Task DuplexRoundTrip_ReadRegisters()
     {
-        var device = new Device("t", holdingRegisters: 200);
-        device.Seed(TableKind.HoldingRegister, 107, new ushort[] { 0xC001 });
+        var device = new Device("t", words: 200);
+        device.Seed(TableKind.Words, 107, new ushort[] { 0xC001 });
         await using var bus = new SerialBus();
         await using var server = await RtuTestServer.Start(bus.SlaveStream, device);
         using var master = bus.MasterStream;
@@ -185,7 +185,7 @@ public class RtuTests
     [Fact]
     public async Task DuplexRoundTrip_WriteThenRead()
     {
-        var device = new Device("t", holdingRegisters: 100);
+        var device = new Device("t", words: 100);
         await using var bus = new SerialBus();
         await using var server = await RtuTestServer.Start(bus.SlaveStream, device);
         using var master = bus.MasterStream;
@@ -198,7 +198,7 @@ public class RtuTests
         Assert.Equal("0600051234", ToHex(pdu));
 
         Span<ushort> w = stackalloc ushort[1];
-        device.Read(TableKind.HoldingRegister, 5, w);
+        device.Read(TableKind.Words, 5, w);
         Assert.Equal((ushort)0x1234, w[0]);
 
         await master.WriteAsync(Rtu.Frame(0x01, Hex("0300050001")));
@@ -213,7 +213,7 @@ public class RtuTests
     [Fact]
     public async Task BadCrcRequest_GetsNoAnswer()
     {
-        var device = new Device("t", holdingRegisters: 100);
+        var device = new Device("t", words: 100);
         await using var bus = new SerialBus();
         await using var server = await RtuTestServer.Start(bus.SlaveStream, device);
         using var master = bus.MasterStream;
@@ -226,7 +226,7 @@ public class RtuTests
     [Fact]
     public async Task ForeignSlaveAddress_GetsNoAnswer()
     {
-        var device = new Device("t", holdingRegisters: 100);
+        var device = new Device("t", words: 100);
         await using var bus = new SerialBus();
         await using var server = await RtuTestServer.Start(bus.SlaveStream, device, unitIds: [1]);
         using var master = bus.MasterStream;

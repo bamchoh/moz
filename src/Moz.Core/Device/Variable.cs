@@ -73,7 +73,7 @@ public sealed record Variable(string Name, TableKind Table, int Offset, Variable
         VariableType.Lint or VariableType.Ulint => 4,
         VariableType.Date or VariableType.Dt => 4,
         VariableType.Bool => throw new ArgumentException(
-            "Bool is bit-sized; use its table kind (Coil/DiscreteInput) instead", nameof(type)),
+            "Bool is bit-sized; use its table kind (Bits/ReadOnlyBits) instead", nameof(type)),
         VariableType.String => throw new ArgumentException(
             "String is sized by its length; use Variable.ElementWords", nameof(type)),
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, null),

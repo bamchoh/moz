@@ -11,8 +11,7 @@ namespace Moz.Scripts;
 /// (System.Numerics.BigInteger is the engine-agnostic equivalent), other
 /// numerics as double (time/tod in milliseconds), bools as boolean, strings
 /// as string, date/dt as DateTime (UTC; JS Date). Raw memory access uses the Modbus
-/// table names; both short ("coil", "holding", ...) and long ("coils",
-/// "holdingRegisters", ...) spellings are accepted.
+/// table names: "bits", "readOnlyBits", "words", "readOnlyWords".
 /// </summary>
 /// <summary>
 /// One client's poll or push range on the device a script runs against,
@@ -133,15 +132,15 @@ public sealed class PlcApi
 
     // --- raw memory -----------------------------------------------------------
 
-    /// <summary>Read one bit: areas "coil"|"coils", "discrete"|"discreteInputs".</summary>
+    /// <summary>Read one bit: areas "bits", "readOnlyBits".</summary>
     public bool readBit(string table, int address) =>
         _device.ReadBit(ParseTable(table), address);
 
-    /// <summary>Write one bit to a coil table.</summary>
+    /// <summary>Write one bit to the bits table.</summary>
     public void writeBit(string table, int address, bool value) =>
         _device.WriteBit(TableForWrite(ParseTable(table)), address, value);
 
-    /// <summary>Read one 16-bit word: areas "holding"|"holdingRegisters", "input"|"inputRegisters".</summary>
+    /// <summary>Read one 16-bit word: areas "words", "readOnlyWords".</summary>
     public ushort readWord(string table, int address)
     {
         Span<ushort> w = stackalloc ushort[1];
@@ -149,7 +148,7 @@ public sealed class PlcApi
         return w[0];
     }
 
-    /// <summary>Write one 16-bit word to a holding register.</summary>
+    /// <summary>Write one 16-bit word to the words table.</summary>
     public void writeWord(string table, int address, ushort value) =>
         _device.Write(TableForWrite(ParseTable(table)), address, new ushort[] { value });
 
@@ -157,16 +156,16 @@ public sealed class PlcApi
 
     private static TableKind ParseTable(string table) => table switch
     {
-        "coil" or "coils" => TableKind.Coil,
-        "discrete" or "discreteInputs" => TableKind.DiscreteInput,
-        "holding" or "holdingRegisters" => TableKind.HoldingRegister,
-        "input" or "inputRegisters" => TableKind.InputRegister,
+        "bits" => TableKind.Bits,
+        "readOnlyBits" => TableKind.ReadOnlyBits,
+        "words" => TableKind.Words,
+        "readOnlyWords" => TableKind.ReadOnlyWords,
         _ => throw new ArgumentException(
-            $"unknown memory area \"{table}\" (coil|coils|discrete|discreteInputs|holding|holdingRegisters|input|inputRegisters)"),
+            $"unknown memory area \"{table}\" (bits|readOnlyBits|words|readOnlyWords)"),
     };
 
     private static TableKind TableForWrite(TableKind table) =>
-        table == TableKind.Coil ? TableKind.Coil : TableKind.HoldingRegister;
+        table == TableKind.Bits ? TableKind.Bits : TableKind.Words;
 
     private static T Require<T>(object? value, Variable v)
     {

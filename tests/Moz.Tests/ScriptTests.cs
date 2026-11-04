@@ -30,18 +30,18 @@ public class ScriptTests : IDisposable
 
     private static (Device Device, VariableTable Vars) MakeDevice()
     {
-        var device = new Device("t", coils: 100, discreteInputs: 100, holdingRegisters: 100, inputRegisters: 100);
+        var device = new Device("t", bits: 100, readOnlyBits: 100, words: 100, readOnlyWords: 100);
         var vars = new VariableTable(device,
         [
-            new Variable("temperature", TableKind.HoldingRegister, 0, VariableType.Real),
-            new Variable("copy", TableKind.HoldingRegister, 2, VariableType.Real),
-            new Variable("flag", TableKind.Coil, 0, VariableType.Bool),
-            new Variable("serial", TableKind.HoldingRegister, 4, VariableType.Ulint),
-            new Variable("label", TableKind.HoldingRegister, 8, VariableType.String, Length: 8),
-            new Variable("timer", TableKind.HoldingRegister, 12, VariableType.Time),
-            new Variable("tod", TableKind.HoldingRegister, 14, VariableType.Tod),
-            new Variable("day", TableKind.HoldingRegister, 16, VariableType.Date),
-            new Variable("stamp", TableKind.HoldingRegister, 20, VariableType.Dt),
+            new Variable("temperature", TableKind.Words, 0, VariableType.Real),
+            new Variable("copy", TableKind.Words, 2, VariableType.Real),
+            new Variable("flag", TableKind.Bits, 0, VariableType.Bool),
+            new Variable("serial", TableKind.Words, 4, VariableType.Ulint),
+            new Variable("label", TableKind.Words, 8, VariableType.String, Length: 8),
+            new Variable("timer", TableKind.Words, 12, VariableType.Time),
+            new Variable("tod", TableKind.Words, 14, VariableType.Tod),
+            new Variable("day", TableKind.Words, 16, VariableType.Date),
+            new Variable("stamp", TableKind.Words, 20, VariableType.Dt),
         ], NullLogger.Instance);
         return (device, vars);
     }
@@ -65,7 +65,7 @@ public class ScriptTests : IDisposable
         var (device, vars) = MakeDevice();
         var plc = new PlcApi(device, vars);
         Assert.Equal("local", plc.getVariableStatus("temperature"));
-        var linked = new PlcApi(device, vars, [new ClientLink(TableKind.Coil, 0, 10, () => true)]); // other table
+        var linked = new PlcApi(device, vars, [new ClientLink(TableKind.Bits, 0, 10, () => true)]); // other table
         Assert.Equal("local", linked.getVariableStatus("temperature"));
     }
 
@@ -76,8 +76,8 @@ public class ScriptTests : IDisposable
         bool up = true;
         var plc = new PlcApi(device, vars,
         [
-            new ClientLink(TableKind.HoldingRegister, 1, 5, () => up),   // overlaps temperature (cells 0..1) and copy
-            new ClientLink(TableKind.HoldingRegister, 2, 1, () => false), // copy only, always down
+            new ClientLink(TableKind.Words, 1, 5, () => up),   // overlaps temperature (cells 0..1) and copy
+            new ClientLink(TableKind.Words, 2, 1, () => false), // copy only, always down
         ]);
         Assert.Equal("connected", plc.getVariableStatus("temperature"));
         Assert.Equal("disconnected", plc.getVariableStatus("copy")); // one of its links is down
@@ -98,7 +98,7 @@ public class ScriptTests : IDisposable
     {
         var (device, vars) = MakeDevice();
         bool up = false;
-        var links = new[] { new ClientLink(TableKind.HoldingRegister, 2, 1, () => up) };
+        var links = new[] { new ClientLink(TableKind.Words, 2, 1, () => up) };
         var runner = MakeRunner(
             "if (plc.getVariableStatus('copy') === 'connected') { plc.writeVariable('copy', 7.5); } else { plc.writeVariable('temperature', 1.5); }",
             vars, intervalMs: 100, links: links);
@@ -124,7 +124,7 @@ public class ScriptTests : IDisposable
         await runner.ExecuteOnceAsync(default);
 
         var w = new ushort[2];
-        device.Read(TableKind.HoldingRegister, 0, w);
+        device.Read(TableKind.Words, 0, w);
         Assert.Equal((ushort)0x4148, w[0]); // IEEE754 12.5 big-endian
         Assert.Equal(0, w[1]);
     }
@@ -145,7 +145,7 @@ public class ScriptTests : IDisposable
         var (device, vars) = MakeDevice();
         var runner = MakeRunner("plc.writeVariable('flag', true);", vars);
         await runner.ExecuteOnceAsync(default);
-        Assert.True(device.ReadBit(TableKind.Coil, 0));
+        Assert.True(device.ReadBit(TableKind.Bits, 0));
         Assert.True(vars.Read<bool>("flag"));
     }
 
@@ -155,20 +155,20 @@ public class ScriptTests : IDisposable
     public async Task Script_RawWordAndBitAccess()
     {
         var (device, vars) = MakeDevice();
-        device.Seed(TableKind.DiscreteInput, 3, new bool[] { true });
+        device.Seed(TableKind.ReadOnlyBits, 3, new bool[] { true });
         var runner = MakeRunner(
             """
-            plc.writeWord('holding', 5, 1234);
-            plc.writeBit('coil', 2, true);
-            if (plc.readBit('discreteInputs', 3) !== true) { throw new Error('discrete read failed'); }
-            if (plc.readWord('holding', 5) !== 1234) { throw new Error('word read failed'); }
+            plc.writeWord('words', 5, 1234);
+            plc.writeBit('bits', 2, true);
+            if (plc.readBit('readOnlyBits', 3) !== true) { throw new Error('discrete read failed'); }
+            if (plc.readWord('words', 5) !== 1234) { throw new Error('word read failed'); }
             """, vars);
         await runner.ExecuteOnceAsync(default);
 
         var w = new ushort[1];
-        device.Read(TableKind.HoldingRegister, 5, w);
+        device.Read(TableKind.Words, 5, w);
         Assert.Equal((ushort)1234, w[0]);
-        Assert.True(device.ReadBit(TableKind.Coil, 2));
+        Assert.True(device.ReadBit(TableKind.Bits, 2));
     }
 
     // --- BigInt: the 64-bit promise ----------------------------------------------
@@ -259,7 +259,7 @@ public class ScriptTests : IDisposable
 
         Assert.Equal("hi", vars.Read<string>("label"));
         var w = new ushort[1];
-        device.Read(TableKind.HoldingRegister, 8, w);
+        device.Read(TableKind.Words, 8, w);
         Assert.Equal((ushort)0x6869, w[0]);
         Assert.Equal(2f, vars.Read<float>("copy"));
     }
@@ -340,13 +340,13 @@ public class ScriptTests : IDisposable
     [Fact]
     public async Task Script_ReadsStructLeaf_ByDottedName()
     {
-        var device = new Device("t", holdingRegisters: 100);
+        var device = new Device("t", words: 100);
         var structs = new Dictionary<string, StructDef>
         {
             ["Motor"] = new("Motor", [new StructField("speed", "int"), new StructField("on", "bool"), new StructField("rpm", "real")]),
         };
-        var leaves = VariableLayout.Expand("motor", TableKind.HoldingRegister, 10, "Motor", 1, 0, structs)
-            .Append(new Variable("copy", TableKind.HoldingRegister, 0, VariableType.Real));
+        var leaves = VariableLayout.Expand("motor", TableKind.Words, 10, "Motor", 1, 0, structs)
+            .Append(new Variable("copy", TableKind.Words, 0, VariableType.Real));
         var vars = new VariableTable(device, leaves, NullLogger.Instance);
         var runner = MakeRunner(
             "plc.writeVariable('motor.speed', 7);\n" +
@@ -356,7 +356,7 @@ public class ScriptTests : IDisposable
         await runner.ExecuteOnceAsync(default);
 
         var w = new ushort[2];
-        device.Read(TableKind.HoldingRegister, 10, w);
+        device.Read(TableKind.Words, 10, w);
         Assert.Equal((ushort)7, w[0]);
         Assert.Equal((ushort)1, w[1]);
         Assert.Equal(1f, vars.Read<float>("copy"));

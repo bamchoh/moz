@@ -30,11 +30,11 @@ interval_ms = 500         # 100..3600000。省略: 1000
 | `plc.writeVariable(name, value, index)` | 変数へ書き込み。型に応じて範囲チェック・エラー |
 | `plc.getVariables()` | 変数名の一覧 (配列)。構造体は葉の名前 (`motor.speed`) で並ぶ |
 | `plc.getVariableStatus(name)` | 変数を覆うクライアント連携の状態: `"local"` / `"connected"` / `"disconnected"` (下記) |
-| `plc.readBit(area, address)` / `plc.writeBit(area, address, value)` | 1 点読み書き (area: coil) |
-| `plc.readWord(area, address)` / `plc.writeWord(area, address, value)` | 1 ワード読み書き (area: holding) |
+| `plc.readBit(area, address)` / `plc.writeBit(area, address, value)` | 1 点読み書き (area: bits / readOnlyBits) |
+| `plc.readWord(area, address)` / `plc.writeWord(area, address, value)` | 1 ワード読み書き (area: words / readOnlyWords) |
 
-- `area` は短い名前と karakuri 由来の長い名前の両方を受け付ける: `coil`/`coils`, `discrete`/`discreteInputs`, `holding`/`holdingRegisters`, `input`/`inputRegisters`
-- discrete/input への write はエラー (読取専用領域)
+- `area` は `bits` / `readOnlyBits` / `words` / `readOnlyWords` のいずれか (フェーズ 20 で Modbus 由来の coil/holding と karakuri 由来の coils/holdingRegisters 等は廃止)
+- readOnlyBits/readOnlyWords への write はエラー (読取専用領域)
 - `readVariable` の戻り値は変数型に応じて:
   | 変数型 | JS 型 |
   |---|---|

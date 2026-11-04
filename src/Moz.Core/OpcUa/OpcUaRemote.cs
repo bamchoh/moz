@@ -303,8 +303,8 @@ public sealed class OpcUaRemote : IRemoteDevice
             Entry = entry;
             bool isBit = Variable.IsBit(entry.Variable.Type);
             int cells = Math.Max(1, entry.Variable.Cells);
-            ScratchVariable = entry.Variable with { Table = isBit ? TableKind.Coil : TableKind.HoldingRegister, Offset = 0 };
-            Scratch = new Device("scratch", coils: isBit ? cells : 1, discreteInputs: 1, holdingRegisters: isBit ? 1 : cells, inputRegisters: 1);
+            ScratchVariable = entry.Variable with { Table = isBit ? TableKind.Bits : TableKind.Words, Offset = 0 };
+            Scratch = new Device("scratch", bits: isBit ? cells : 1, readOnlyBits: 1, words: isBit ? 1 : cells, readOnlyWords: 1);
             ScratchTable = new VariableTable(Scratch, [ScratchVariable], NullLogger.Instance);
         }
 

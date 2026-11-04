@@ -6,12 +6,12 @@ level = "debug"
 
 [[device]]
 name = "plc-a"
-holding = 1000
-coils = 1000
+words = 1000
+bits = 1000
 
 [[device]]
 name = "plc-mirror"
-holding = 1000
+words = 1000
 
 # Struct (phase 8): fields laid out sequentially; expands to the leaf
 # variables motor.speed / motor.on / motor.label (scripts, logs, OPC UA
@@ -35,7 +35,7 @@ length = 8
 [[variable]]
 name = "temperature"
 device = "plc-a"
-kind = "holding"
+kind = "words"
 offset = 0
 type = "real"
 value = 20.0            # initial value, seeded before anything runs
@@ -43,7 +43,7 @@ value = 20.0            # initial value, seeded before anything runs
 [[variable]]
 name = "temperature-mirror"
 device = "plc-mirror"
-kind = "holding"
+kind = "words"
 offset = 0
 type = "real"
 
@@ -51,7 +51,7 @@ type = "real"
 [[variable]]
 name = "setpoint"
 device = "plc-mirror"
-kind = "holding"
+kind = "words"
 offset = 20
 type = "int"
 
@@ -59,7 +59,7 @@ type = "int"
 [[variable]]
 name = "ua-temperature"
 device = "plc-mirror"
-kind = "holding"
+kind = "words"
 offset = 70
 type = "real"
 
@@ -67,21 +67,21 @@ type = "real"
 [[variable]]
 name = "setpoint-received"
 device = "plc-a"
-kind = "holding"
+kind = "words"
 offset = 20
 type = "int"
 
 [[variable]]
 name = "pump"
 device = "plc-a"
-kind = "coil"
+kind = "bits"
 offset = 0
 type = "bool"
 
 [[variable]]
 name = "motor"
 device = "plc-a"
-kind = "holding"
+kind = "words"
 offset = 100
 type = "Motor"
 value = { speed = 100, on = false, label = "idle" }   # struct initial value (fields left out stay 0)
@@ -89,7 +89,7 @@ value = { speed = 100, on = false, label = "idle" }   # struct initial value (fi
 [[variable]]
 name = "updated"
 device = "plc-a"
-kind = "holding"
+kind = "words"
 offset = 110
 type = "dt"
 
@@ -118,8 +118,8 @@ remote_offset = 0
 count = 2
 local_offset = 0
 
-# push (phase 9): every change of plc-mirror holding 20..21 (the "setpoint"
-# variable) is written to plc-a holding 20..21; nothing is read back here
+# push (phase 9): every change of plc-mirror words 20..21 (the "setpoint"
+# variable) is written to plc-a words 20..21; nothing is read back here
 [[client.push]]
 fc = 16
 local_offset = 20
@@ -128,7 +128,7 @@ remote_offset = 20
 
 # MC protocol master (phase 12): same poll/push loop, MELSEC device notation.
 # Polls D0..D1 (the "temperature" real of plc-a) through the mc-3e server
-# "mc-a" below into plc-mirror holding 50..51.
+# "mc-a" below into plc-mirror words 50..51.
 [[client]]
 name = "mc-self-poll"
 protocol = "mc-3e"
@@ -188,8 +188,8 @@ bind = "127.0.0.1"
 port = 50201
 
 # MC protocol server (phase 13): plc-a as a MELSEC CPU. Default map:
-# D -> holding, M -> coil, X -> discrete (all from 0); add [[server.map]]
-# for other devices, e.g. W -> holding 500.
+# D -> words, M -> bits, X -> read_only_bits (all from 0); add [[server.map]]
+# for other devices, e.g. W -> words 500.
 [[server]]
 name = "mc-a"
 protocol = "mc-3e"
@@ -199,10 +199,10 @@ port = 5010
 
 [[server.map]]
 device = "W"
-kind = "holding"
+kind = "words"
 offset = 500
 
-# FINS server (phase 19): plc-a as an Omron CPU unit. Default map: DM -> holding
+# FINS server (phase 19): plc-a as an Omron CPU unit. Default map: DM -> words
 # (from 0); every other area needs a [[server.map]] (word tables only, bit
 # access addresses bits inside the words). FINS/TCP with node 10; add a
 # second [[server]] with protocol = "fins-udp" for UDP clients.
@@ -216,7 +216,7 @@ node = 10
 
 [[server.map]]
 device = "CIO"
-kind = "holding"
+kind = "words"
 offset = 600
 count = 100
 

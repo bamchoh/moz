@@ -35,14 +35,14 @@ public class VariableLayoutTests
     };
 
     private static IReadOnlyList<Variable> Expand(string name, string type, int offset = 0, int count = 1, int length = 0) =>
-        VariableLayout.Expand(name, TableKind.HoldingRegister, offset, type, count, length, Structs);
+        VariableLayout.Expand(name, TableKind.Words, offset, type, count, length, Structs);
 
     [Fact]
     public void Scalar_PassesThrough()
     {
         var leaves = Expand("t", "real", offset: 3, count: 2);
         var leaf = Assert.Single(leaves);
-        Assert.Equal(new Variable("t", TableKind.HoldingRegister, 3, VariableType.Real, 2), leaf);
+        Assert.Equal(new Variable("t", TableKind.Words, 3, VariableType.Real, 2), leaf);
 
         var s = Assert.Single(Expand("label", "string", length: 7));
         Assert.Equal(VariableType.String, s.Type);
@@ -55,9 +55,9 @@ public class VariableLayoutTests
         var leaves = Expand("motor", "Motor", offset: 10);
         Assert.Equal(
         [
-            new Variable("motor.speed", TableKind.HoldingRegister, 10, VariableType.Int),
-            new Variable("motor.on", TableKind.HoldingRegister, 11, VariableType.BoolWord),
-            new Variable("motor.rpm", TableKind.HoldingRegister, 12, VariableType.Real),
+            new Variable("motor.speed", TableKind.Words, 10, VariableType.Int),
+            new Variable("motor.on", TableKind.Words, 11, VariableType.BoolWord),
+            new Variable("motor.rpm", TableKind.Words, 12, VariableType.Real),
         ], leaves);
         Assert.Equal(4, VariableLayout.Words("Motor", 0, Structs));
     }
@@ -109,7 +109,7 @@ public class VariableLayoutTests
         };
         Assert.Throws<ArgumentException>(() => VariableLayout.Words("A", 0, cyclic));
         Assert.Throws<ArgumentException>(() =>
-            VariableLayout.Expand("a", TableKind.HoldingRegister, 0, "A", 1, 0, cyclic));
+            VariableLayout.Expand("a", TableKind.Words, 0, "A", 1, 0, cyclic));
     }
 
     // --- BoolWord at the three touchpoints ----------------------------------------
@@ -117,21 +117,21 @@ public class VariableLayoutTests
     [Fact]
     public void BoolWord_RoundTrip_NonZeroIsTrue_LogsLowercase()
     {
-        var device = new Device("plc-a", holdingRegisters: 10);
+        var device = new Device("plc-a", words: 10);
         var provider = new CapturingProvider();
         var table = new VariableTable(device,
-            [new Variable("on", TableKind.HoldingRegister, 0, VariableType.BoolWord)], provider.CreateLogger("t"));
+            [new Variable("on", TableKind.Words, 0, VariableType.BoolWord)], provider.CreateLogger("t"));
 
-        device.Write(TableKind.HoldingRegister, 0, new ushort[] { 0x0005 });
+        device.Write(TableKind.Words, 0, new ushort[] { 0x0005 });
         Assert.True(table.Read<bool>("on"));
         Assert.Contains(provider.Entries, e => e.Message == "plc-a on=true");
 
         table.Write("on", false);
         var w = new ushort[1];
-        device.Read(TableKind.HoldingRegister, 0, w);
+        device.Read(TableKind.Words, 0, w);
         Assert.Equal((ushort)0, w[0]);
         table.Write("on", true);
-        device.Read(TableKind.HoldingRegister, 0, w);
+        device.Read(TableKind.Words, 0, w);
         Assert.Equal((ushort)1, w[0]);
         Assert.Throws<ArgumentException>(() => table.Read<int>("on"));
     }
@@ -139,8 +139,8 @@ public class VariableLayoutTests
     [Fact]
     public void BoolWord_UaCodec_IsBoolean()
     {
-        var device = new Device("plc-a", holdingRegisters: 10);
-        var v = new Variable("on", TableKind.HoldingRegister, 0, VariableType.BoolWord);
+        var device = new Device("plc-a", words: 10);
+        var v = new Variable("on", TableKind.Words, 0, VariableType.BoolWord);
         var table = new VariableTable(device, [v], NullLogger.Instance);
 
         Assert.Equal(DataTypeIds.Boolean, UaValueCodec.DataType(VariableType.BoolWord));
@@ -153,13 +153,13 @@ public class VariableLayoutTests
     [Fact]
     public void StructLeaf_ChangeLog_OneLinePerLeaf()
     {
-        var device = new Device("plc-a", holdingRegisters: 10);
+        var device = new Device("plc-a", words: 10);
         var provider = new CapturingProvider();
         var table = new VariableTable(device,
-            VariableLayout.Expand("motor", TableKind.HoldingRegister, 0, "Motor", 1, 0, Structs), provider.CreateLogger("t"));
+            VariableLayout.Expand("motor", TableKind.Words, 0, "Motor", 1, 0, Structs), provider.CreateLogger("t"));
 
         // a Modbus master writes the whole struct in one FC16 → one line per leaf
-        device.Write(TableKind.HoldingRegister, 0, new ushort[] { 0x0007, 0x0001, 0x4148, 0x0000 });
+        device.Write(TableKind.Words, 0, new ushort[] { 0x0007, 0x0001, 0x4148, 0x0000 });
 
         var lines = provider.Entries.Where(e => e.EventId == 1101).Select(e => e.Message).ToList();
         Assert.Equal(["plc-a motor.speed=7", "plc-a motor.on=true", "plc-a motor.rpm=12.5"], lines);

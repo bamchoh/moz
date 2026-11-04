@@ -7,11 +7,11 @@ public class DeviceTests
     [Fact]
     public void RoundTrip_WordSpan()
     {
-        var device = new Device("t", holdingRegisters: 10);
+        var device = new Device("t", words: 10);
         Span<ushort> w = [1, 2, 3];
-        device.Write(TableKind.HoldingRegister, 2, w);
+        device.Write(TableKind.Words, 2, w);
         Span<ushort> read = new ushort[3];
-        device.Read(TableKind.HoldingRegister, 2, read);
+        device.Read(TableKind.Words, 2, read);
         Assert.Equal((ushort)1, read[0]);
         Assert.Equal((ushort)2, read[1]);
         Assert.Equal((ushort)3, read[2]);
@@ -21,29 +21,29 @@ public class DeviceTests
     public void ReadOnlyTables_RejectWrite()
     {
         var device = new Device("t");
-        Assert.Throws<InvalidOperationException>(() => device.Write(TableKind.InputRegister, 0, (ReadOnlySpan<ushort>)[1]));
-        Assert.Throws<InvalidOperationException>(() => device.WriteBit(TableKind.DiscreteInput, 0, true));
+        Assert.Throws<InvalidOperationException>(() => device.Write(TableKind.ReadOnlyWords, 0, (ReadOnlySpan<ushort>)[1]));
+        Assert.Throws<InvalidOperationException>(() => device.WriteBit(TableKind.ReadOnlyBits, 0, true));
     }
 
     [Fact]
     public void TableKindMismatch_Rejected()
     {
         var device = new Device("t");
-        Assert.Throws<InvalidOperationException>(() => device.Write(TableKind.HoldingRegister, 0, (ReadOnlySpan<bool>)[true]));
+        Assert.Throws<InvalidOperationException>(() => device.Write(TableKind.Words, 0, (ReadOnlySpan<bool>)[true]));
     }
 
     [Fact]
     public void BoundsChecked()
     {
-        var device = new Device("t", coils: 10);
-        Assert.Throws<IndexOutOfRangeException>(() => device.Read(TableKind.Coil, 8, new bool[5]));
-        Assert.Throws<IndexOutOfRangeException>(() => device.WriteBit(TableKind.Coil, 10, true));
+        var device = new Device("t", bits: 10);
+        Assert.Throws<IndexOutOfRangeException>(() => device.Read(TableKind.Bits, 8, new bool[5]));
+        Assert.Throws<IndexOutOfRangeException>(() => device.WriteBit(TableKind.Bits, 10, true));
     }
 
     [Fact]
     public async Task ConcurrentAccess_IsRaceFree()
     {
-        var device = new Device("t", holdingRegisters: 1000);
+        var device = new Device("t", words: 1000);
         var tasks = Enumerable.Range(0, 8).Select(taskId => Task.Run(() =>
         {
             var w = new ushort[1];
@@ -53,9 +53,9 @@ public class DeviceTests
                 for (int round = 0; round < 3; round++)
                 {
                     w[0] = (ushort)(taskId * 3 + round + 1);
-                    device.Write(TableKind.HoldingRegister, idx, w);
+                    device.Write(TableKind.Words, idx, w);
                     var v = new ushort[1];
-                    device.Read(TableKind.HoldingRegister, idx, v);
+                    device.Read(TableKind.Words, idx, v);
                     // u16 cells are memcpy'd under the lock, so reads never tear;
                     // we mainly assert the loop terminates without exception
                     Assert.True(v[0] <= ushort.MaxValue);
@@ -70,15 +70,15 @@ public class DeviceTests
     [Fact]
     public void Watch_NotifyOnOverlappingWriteOnly()
     {
-        var device = new Device("t", holdingRegisters: 100);
+        var device = new Device("t", words: 100);
         var changes = new List<DeviceChange>();
-        using var sub = device.Watch(TableKind.HoldingRegister, 10, 5, changes.Add);
+        using var sub = device.Watch(TableKind.Words, 10, 5, changes.Add);
 
         Span<ushort> w = [7];
-        device.Write(TableKind.HoldingRegister, 12, w);   // inside → notify
-        device.Write(TableKind.HoldingRegister, 50, w);   // outside → no notify
+        device.Write(TableKind.Words, 12, w);   // inside → notify
+        device.Write(TableKind.Words, 50, w);   // outside → no notify
         Span<ushort> five = [1, 2, 3, 4, 5];
-        device.Write(TableKind.HoldingRegister, 8, five); // overlaps tail → notify
+        device.Write(TableKind.Words, 8, five); // overlaps tail → notify
 
         Assert.Equal(2, changes.Count);
         Assert.Equal(12, changes[0].Start);
@@ -90,61 +90,61 @@ public class DeviceTests
     [Fact]
     public void Watch_TableIsolated()
     {
-        var device = new Device("t", coils: 10);
+        var device = new Device("t", bits: 10);
         var changes = new List<DeviceChange>();
-        using var sub = device.Watch(TableKind.HoldingRegister, 0, 10, changes.Add);
-        device.WriteBit(TableKind.Coil, 0, true);
+        using var sub = device.Watch(TableKind.Words, 0, 10, changes.Add);
+        device.WriteBit(TableKind.Bits, 0, true);
         Assert.Empty(changes);
     }
 
     [Fact]
     public void Watch_DisposeStopsNotifications()
     {
-        var device = new Device("t", coils: 10);
+        var device = new Device("t", bits: 10);
         var changes = new List<DeviceChange>();
-        var sub = device.Watch(TableKind.Coil, 0, 10, changes.Add);
-        device.WriteBit(TableKind.Coil, 0, true);
+        var sub = device.Watch(TableKind.Bits, 0, 10, changes.Add);
+        device.WriteBit(TableKind.Bits, 0, true);
         Assert.Single(changes);
         sub.Dispose();
-        device.WriteBit(TableKind.Coil, 0, false);
+        device.WriteBit(TableKind.Bits, 0, false);
         Assert.Single(changes);
     }
 
     [Fact]
     public void Watch_CallbackMayWriteBack_NoDeadlock()
     {
-        var device = new Device("t", holdingRegisters: 10);
+        var device = new Device("t", words: 10);
         var reentered = false;
-        using var sub = device.Watch(TableKind.HoldingRegister, 0, 1, change =>
+        using var sub = device.Watch(TableKind.Words, 0, 1, change =>
         {
-            device.Write(TableKind.HoldingRegister, 5, (ReadOnlySpan<ushort>)[99]); // re-entrant write
+            device.Write(TableKind.Words, 5, (ReadOnlySpan<ushort>)[99]); // re-entrant write
             reentered = true;
         });
         Span<ushort> w = [1];
-        device.Write(TableKind.HoldingRegister, 0, w);
+        device.Write(TableKind.Words, 0, w);
         Assert.True(reentered);
     }
 
     [Fact]
     public void Watch_OneWriteToOneCallback_Exactly()
     {
-        var device = new Device("t", coils: 10);
+        var device = new Device("t", bits: 10);
         var count = 0;
-        using var sub = device.Watch(TableKind.Coil, 0, 10, _ => Interlocked.Increment(ref count));
+        using var sub = device.Watch(TableKind.Bits, 0, 10, _ => Interlocked.Increment(ref count));
         Span<bool> bits = new bool[10];
         bits.Fill(true);
-        device.Write(TableKind.Coil, 0, bits); // batch write → ONE event
+        device.Write(TableKind.Bits, 0, bits); // batch write → ONE event
         Assert.Equal(1, Volatile.Read(ref count));
     }
 
     [Fact]
     public void Watch_DifferentWatchersOverlap_AllNotified()
     {
-        var device = new Device("t", coils: 10);
+        var device = new Device("t", bits: 10);
         int a = 0, b = 0;
-        using var _a = device.Watch(TableKind.Coil, 0, 3, _ => Interlocked.Increment(ref a));
-        using var _b = device.Watch(TableKind.Coil, 2, 3, _ => Interlocked.Increment(ref b));
-        device.WriteBit(TableKind.Coil, 2, true); // overlaps both [0,3) and [2,5)
+        using var _a = device.Watch(TableKind.Bits, 0, 3, _ => Interlocked.Increment(ref a));
+        using var _b = device.Watch(TableKind.Bits, 2, 3, _ => Interlocked.Increment(ref b));
+        device.WriteBit(TableKind.Bits, 2, true); // overlaps both [0,3) and [2,5)
         Assert.Equal(1, Volatile.Read(ref a));
         Assert.Equal(1, Volatile.Read(ref b));
     }
@@ -154,26 +154,26 @@ public class DeviceTests
     [Fact]
     public void Mirror_WritesReadOnlyTables_AndNotifiesWatchers()
     {
-        var device = new Device("d", discreteInputs: 16, inputRegisters: 16);
+        var device = new Device("d", readOnlyBits: 16, readOnlyWords: 16);
         var changes = new List<DeviceChange>();
-        using var w1 = device.Watch(TableKind.DiscreteInput, 0, 4, changes.Add);
-        using var w2 = device.Watch(TableKind.InputRegister, 0, 4, changes.Add);
+        using var w1 = device.Watch(TableKind.ReadOnlyBits, 0, 4, changes.Add);
+        using var w2 = device.Watch(TableKind.ReadOnlyWords, 0, 4, changes.Add);
 
-        device.Mirror(TableKind.DiscreteInput, 1, new[] { true, true });
-        device.Mirror(TableKind.InputRegister, 2, new ushort[] { 0xBEEF });
+        device.Mirror(TableKind.ReadOnlyBits, 1, new[] { true, true });
+        device.Mirror(TableKind.ReadOnlyWords, 2, new ushort[] { 0xBEEF });
 
-        Assert.True(device.ReadBit(TableKind.DiscreteInput, 1));
-        Assert.True(device.ReadBit(TableKind.DiscreteInput, 2));
+        Assert.True(device.ReadBit(TableKind.ReadOnlyBits, 1));
+        Assert.True(device.ReadBit(TableKind.ReadOnlyBits, 2));
         var words = new ushort[1];
-        device.Read(TableKind.InputRegister, 2, words);
+        device.Read(TableKind.ReadOnlyWords, 2, words);
         Assert.Equal((ushort)0xBEEF, words[0]);
-        Assert.Equal([new DeviceChange(TableKind.DiscreteInput, 1, 2), new DeviceChange(TableKind.InputRegister, 2, 1)], changes);
+        Assert.Equal([new DeviceChange(TableKind.ReadOnlyBits, 1, 2), new DeviceChange(TableKind.ReadOnlyWords, 2, 1)], changes);
     }
 
     [Fact]
     public void Mirror_OutOfRange_Throws()
     {
-        var device = new Device("d", inputRegisters: 4);
-        Assert.Throws<IndexOutOfRangeException>(() => device.Mirror(TableKind.InputRegister, 3, new ushort[] { 1, 2 }));
+        var device = new Device("d", readOnlyWords: 4);
+        Assert.Throws<IndexOutOfRangeException>(() => device.Mirror(TableKind.ReadOnlyWords, 3, new ushort[] { 1, 2 }));
     }
 }

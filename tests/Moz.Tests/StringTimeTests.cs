@@ -12,17 +12,17 @@ namespace Moz.Tests;
 /// </summary>
 public class StringTimeTests
 {
-    private readonly Device _device = new("plc-a", holdingRegisters: 100);
+    private readonly Device _device = new("plc-a", words: 100);
 
     private static Variable Str(string name, int offset, int length, int count = 1) =>
-        new(name, TableKind.HoldingRegister, offset, VariableType.String, count, length);
+        new(name, TableKind.Words, offset, VariableType.String, count, length);
 
     private VariableTable Table(params Variable[] vars) => new(_device, vars, NullLogger.Instance);
 
     private ushort[] Words(int offset, int count)
     {
         var w = new ushort[count];
-        _device.Read(TableKind.HoldingRegister, offset, w);
+        _device.Read(TableKind.Words, offset, w);
         return w;
     }
 
@@ -102,7 +102,7 @@ public class StringTimeTests
     public void String_ReadStopsAtNul_InvalidUtf8_Replacement()
     {
         var table = Table(Str("label", 0, 5));
-        _device.Write(TableKind.HoldingRegister, 0, new ushort[] { 0x41FF, 0x0042, 0x4343 });
+        _device.Write(TableKind.Words, 0, new ushort[] { 0x41FF, 0x0042, 0x4343 });
         Assert.Equal("A�", table.Read<string>("label"));
     }
 
@@ -129,7 +129,7 @@ public class StringTimeTests
     [Fact]
     public void Time_IsInt32Ms_BigEndian()
     {
-        var table = Table(new Variable("timer", TableKind.HoldingRegister, 0, VariableType.Time));
+        var table = Table(new Variable("timer", TableKind.Words, 0, VariableType.Time));
         table.Write("timer", -1500);
         Assert.Equal(new ushort[] { 0xFFFF, 0xFA24 }, Words(0, 2));
         Assert.Equal(-1500, table.Read<int>("timer"));
@@ -138,7 +138,7 @@ public class StringTimeTests
     [Fact]
     public void Tod_IsUInt32Ms()
     {
-        var table = Table(new Variable("tod", TableKind.HoldingRegister, 0, VariableType.Tod));
+        var table = Table(new Variable("tod", TableKind.Words, 0, VariableType.Tod));
         table.Write("tod", 86399999u);
         Assert.Equal(new ushort[] { 0x0526, 0x5BFF }, Words(0, 2));
         Assert.Equal(86399999u, table.Read<uint>("tod"));
@@ -148,8 +148,8 @@ public class StringTimeTests
     public void Date_And_Dt_AreUInt64Seconds()
     {
         var table = Table(
-            new Variable("day", TableKind.HoldingRegister, 0, VariableType.Date),
-            new Variable("stamp", TableKind.HoldingRegister, 4, VariableType.Dt));
+            new Variable("day", TableKind.Words, 0, VariableType.Date),
+            new Variable("stamp", TableKind.Words, 4, VariableType.Dt));
         table.Write("day", 1_793_491_200ul); // 2026-11-01T00:00:00Z
         table.Write("stamp", 1_793_525_400ul); // 2026-11-01T09:30:00Z
         Assert.Equal(new ushort[] { 0, 0, 0x6AE6, 0x8100 }, Words(0, 4));
@@ -161,8 +161,8 @@ public class StringTimeTests
     public void TimeTypes_HostTypes()
     {
         var table = Table(
-            new Variable("timer", TableKind.HoldingRegister, 0, VariableType.Time),
-            new Variable("stamp", TableKind.HoldingRegister, 4, VariableType.Dt));
+            new Variable("timer", TableKind.Words, 0, VariableType.Time),
+            new Variable("stamp", TableKind.Words, 4, VariableType.Dt));
         Assert.Throws<ArgumentException>(() => table.Read<uint>("timer"));
         Assert.Throws<ArgumentException>(() => table.Read<long>("stamp"));
     }
@@ -187,9 +187,9 @@ public class StringTimeTests
     public void ChangeLog_Time_Milliseconds_Dt_Iso8601()
     {
         var (table, log) = Logged(_device,
-            new Variable("timer", TableKind.HoldingRegister, 0, VariableType.Time),
-            new Variable("stamp", TableKind.HoldingRegister, 4, VariableType.Dt),
-            new Variable("day", TableKind.HoldingRegister, 8, VariableType.Date));
+            new Variable("timer", TableKind.Words, 0, VariableType.Time),
+            new Variable("stamp", TableKind.Words, 4, VariableType.Dt),
+            new Variable("day", TableKind.Words, 8, VariableType.Date));
         table.Write("timer", 1500);
         table.Write("stamp", 1_793_525_400ul);
         table.Write("day", 1_793_491_200ul);

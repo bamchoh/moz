@@ -13,7 +13,7 @@ namespace Moz.Config;
 /// </summary>
 public static partial class ConfigLoader
 {
-    private static readonly string[] VariableKinds = ["coil", "discrete", "holding", "input"];
+    private static readonly string[] VariableKinds = ["bits", "read_only_bits", "words", "read_only_words"];
 
     /// <summary>Struct definitions as the runtime consumes them (first declaration wins on duplicates).</summary>
     public static IReadOnlyDictionary<string, StructDef> ToStructDefs(MozConfig config)
@@ -132,8 +132,8 @@ public static partial class ConfigLoader
             if (bitType != table.IsBit())
             {
                 errors.Add(new ConfigError(path, bitType
-                    ? $"type \"{variable.Type}\" requires kind coil|discrete (got \"{variable.Kind}\") in {ctx}"
-                    : $"type \"{variable.Type}\" requires kind holding|input (got \"{variable.Kind}\") in {ctx}"));
+                    ? $"type \"{variable.Type}\" requires kind bits|read_only_bits (got \"{variable.Kind}\") in {ctx}"
+                    : $"type \"{variable.Type}\" requires kind words|read_only_words (got \"{variable.Kind}\") in {ctx}"));
             }
             if (variable.Count < 1)
             {
@@ -206,10 +206,10 @@ public static partial class ConfigLoader
     {
         int length = table switch
         {
-            TableKind.Coil => device.Coils,
-            TableKind.DiscreteInput => device.Discrete,
-            TableKind.HoldingRegister => device.Holding,
-            TableKind.InputRegister => device.Input,
+            TableKind.Bits => device.Bits,
+            TableKind.ReadOnlyBits => device.ReadOnlyBits,
+            TableKind.Words => device.Words,
+            TableKind.ReadOnlyWords => device.ReadOnlyWords,
             _ => throw new ArgumentOutOfRangeException(nameof(table), table, null),
         };
         if (variable.Offset < 0 || variable.Offset + cells > length)
@@ -264,10 +264,10 @@ public static partial class ConfigLoader
     {
         switch (kind)
         {
-            case "coil": table = TableKind.Coil; return true;
-            case "discrete": table = TableKind.DiscreteInput; return true;
-            case "holding": table = TableKind.HoldingRegister; return true;
-            case "input": table = TableKind.InputRegister; return true;
+            case "bits": table = TableKind.Bits; return true;
+            case "read_only_bits": table = TableKind.ReadOnlyBits; return true;
+            case "words": table = TableKind.Words; return true;
+            case "read_only_words": table = TableKind.ReadOnlyWords; return true;
             default: table = default; return false;
         }
     }

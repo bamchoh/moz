@@ -19,13 +19,13 @@ public class ClientLoopTests
     {
         var remote = new FakeRemote
         {
-            Polls = [new(TableKind.DiscreteInput, 5, 3), new(TableKind.InputRegister, 2, 2)],
+            Polls = [new(TableKind.ReadOnlyBits, 5, 3), new(TableKind.ReadOnlyWords, 2, 2)],
             Bits = [true, false, true],
             Words = [0x1234, 0xABCD],
         };
-        var local = new Device("local", discreteInputs: 16, inputRegisters: 16);
+        var local = new Device("local", readOnlyBits: 16, readOnlyWords: 16);
         int notified = 0;
-        using var w = local.Watch(TableKind.InputRegister, 2, 2, _ => Interlocked.Increment(ref notified));
+        using var w = local.Watch(TableKind.ReadOnlyWords, 2, 2, _ => Interlocked.Increment(ref notified));
         var poller = new ClientPoller("p", remote, 50, local, NullLogger.Instance);
 
         using var cts = new CancellationTokenSource();
@@ -35,10 +35,10 @@ public class ClientLoopTests
         await task;
 
         var bits = new bool[3];
-        local.Read(TableKind.DiscreteInput, 5, bits);
+        local.Read(TableKind.ReadOnlyBits, 5, bits);
         Assert.Equal([true, false, true], bits);
         var words = new ushort[2];
-        local.Read(TableKind.InputRegister, 2, words);
+        local.Read(TableKind.ReadOnlyWords, 2, words);
         Assert.Equal([0x1234, 0xABCD], words);
         Assert.True(remote.Reads >= 2);
         Assert.True(Volatile.Read(ref notified) >= 1);
@@ -49,9 +49,9 @@ public class ClientLoopTests
     [Fact]
     public async Task Poll_NullRead_IsRejection_NothingMirrored_LoopContinues()
     {
-        var remote = new FakeRemote { Polls = [new(TableKind.HoldingRegister, 0, 1)], Words = null };
-        var local = new Device("local", holdingRegisters: 8);
-        local.Write(TableKind.HoldingRegister, 0, new ushort[] { 0x5555 });
+        var remote = new FakeRemote { Polls = [new(TableKind.Words, 0, 1)], Words = null };
+        var local = new Device("local", words: 8);
+        local.Write(TableKind.Words, 0, new ushort[] { 0x5555 });
         var poller = new ClientPoller("p", remote, 50, local, NullLogger.Instance);
 
         using var cts = new CancellationTokenSource();
@@ -61,7 +61,7 @@ public class ClientLoopTests
         await task;
 
         var words = new ushort[1];
-        local.Read(TableKind.HoldingRegister, 0, words);
+        local.Read(TableKind.Words, 0, words);
         Assert.Equal((ushort)0x5555, words[0]);
         Assert.True(remote.Reads >= 2);     // kept polling
         Assert.Equal(0, remote.Resets);     // a rejection is not a communication error
@@ -70,9 +70,9 @@ public class ClientLoopTests
     [Fact]
     public async Task Push_NothingAtStartup_LocalChange_WritesCurrentCells_Once()
     {
-        var remote = new FakeRemote { Pushes = [new(TableKind.HoldingRegister, 4, 2), new(TableKind.Coil, 1, 1)] };
-        var local = new Device("local", coils: 8, holdingRegisters: 8);
-        local.Write(TableKind.HoldingRegister, 4, new ushort[] { 1, 2 }); // before the poller: not an event
+        var remote = new FakeRemote { Pushes = [new(TableKind.Words, 4, 2), new(TableKind.Bits, 1, 1)] };
+        var local = new Device("local", bits: 8, words: 8);
+        local.Write(TableKind.Words, 4, new ushort[] { 1, 2 }); // before the poller: not an event
         var poller = new ClientPoller("p", remote, 50, local, NullLogger.Instance);
 
         using var cts = new CancellationTokenSource();
@@ -81,8 +81,8 @@ public class ClientLoopTests
         Assert.Empty(remote.Writes);
         Assert.False(poller.HasPendingPush);
 
-        local.Write(TableKind.HoldingRegister, 4, new ushort[] { 7, 8 });
-        local.WriteBit(TableKind.Coil, 1, true);
+        local.Write(TableKind.Words, 4, new ushort[] { 7, 8 });
+        local.WriteBit(TableKind.Bits, 1, true);
         await Task.Delay(150);
         await cts.CancelAsync();
         await task;
@@ -98,15 +98,15 @@ public class ClientLoopTests
     [Fact]
     public async Task Push_WriteThrows_KeepsPending_ResetsLink_RetriesNextTick()
     {
-        var remote = new FakeRemote { Pushes = [new(TableKind.HoldingRegister, 0, 1)], FailWrites = 2 };
-        var local = new Device("local", holdingRegisters: 8);
+        var remote = new FakeRemote { Pushes = [new(TableKind.Words, 0, 1)], FailWrites = 2 };
+        var local = new Device("local", words: 8);
         var provider = new CapturingProvider();
         var poller = new ClientPoller("p", remote, 50, local, provider.CreateLogger("p"));
 
         using var cts = new CancellationTokenSource();
         var task = poller.RunAsync(cts.Token);
         await Task.Delay(80);
-        local.Write(TableKind.HoldingRegister, 0, new ushort[] { 9 });
+        local.Write(TableKind.Words, 0, new ushort[] { 9 });
         await Task.Delay(60);
         Assert.True(poller.HasPendingPush);
         await Task.Delay(300);
@@ -124,11 +124,11 @@ public class ClientLoopTests
     {
         var remote = new FakeRemote
         {
-            Polls = [new(TableKind.HoldingRegister, 0, 2)],
-            Pushes = [new(TableKind.HoldingRegister, 0, 2)],
+            Polls = [new(TableKind.Words, 0, 2)],
+            Pushes = [new(TableKind.Words, 0, 2)],
             Words = [0x1111, 0x2222],
         };
-        var local = new Device("local", holdingRegisters: 8);
+        var local = new Device("local", words: 8);
         var poller = new ClientPoller("p", remote, 50, local, NullLogger.Instance);
 
         using var cts = new CancellationTokenSource();
@@ -136,7 +136,7 @@ public class ClientLoopTests
         await Task.Delay(250);
         Assert.Empty(remote.Writes);        // many polls, no echo
 
-        local.Write(TableKind.HoldingRegister, 0, new ushort[] { 0x3333, 0x4444 });
+        local.Write(TableKind.Words, 0, new ushort[] { 0x3333, 0x4444 });
         await Task.Delay(150);
         await cts.CancelAsync();
         await task;
@@ -146,8 +146,8 @@ public class ClientLoopTests
     [Fact]
     public async Task Connect_Throws_LogsEachCycle_UntilItSucceeds()
     {
-        var remote = new FakeRemote { Polls = [new(TableKind.HoldingRegister, 0, 1)], Words = [42], FailConnects = 2 };
-        var local = new Device("local", holdingRegisters: 8);
+        var remote = new FakeRemote { Polls = [new(TableKind.Words, 0, 1)], Words = [42], FailConnects = 2 };
+        var local = new Device("local", words: 8);
         var provider = new CapturingProvider();
         var poller = new ClientPoller("p", remote, 50, local, provider.CreateLogger("p"));
 
@@ -162,7 +162,7 @@ public class ClientLoopTests
         Assert.Equal(2, provider.Entries.Count(e => e.EventId == Moz.Logging.CommLog.EventIds.ConnError.Id && e.Message.Contains("no link")));
         Assert.Equal(1, provider.Entries.Count(e => e.EventId == Moz.Logging.CommLog.EventIds.ConnAccepted.Id));
         var words = new ushort[1];
-        local.Read(TableKind.HoldingRegister, 0, words);
+        local.Read(TableKind.Words, 0, words);
         Assert.Equal((ushort)42, words[0]);
     }
 }
