@@ -171,7 +171,7 @@ public class McConfigTests : IDisposable
     [InlineData("count = 20", "count = 0", "server.map count value 0 is out of range")]
     [InlineData("offset = 10", "offset = -1", "server.map offset value -1 is out of range")]
     [InlineData("count = 20", "count = 20\n\n[[server.map]]\ndevice = \"w\"\nkind = \"holding\"\noffset = 0", "duplicate server.map device \"W\"")]
-    [InlineData("protocol = \"mc-3e\"", "protocol = \"modbus-tcp\"", "server.map is only valid for mc-3e servers")]
+    [InlineData("protocol = \"mc-3e\"", "protocol = \"modbus-tcp\"", "server.map is only valid for mc-3e and fins servers")]
     [InlineData("port = 5000", "port = 5000\nserial_port = \"COM1\"", "server.serial_port is only valid for serial protocols")]
     public void McServer_InvalidMap_Fails(string find, string replace, string why)
     {

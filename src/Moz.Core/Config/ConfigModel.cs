@@ -431,9 +431,12 @@ public sealed class ServerConfig
     [TomlPropertyName("name")]
     public string Name { get; set; } = "";
 
-    /// <summary>"modbus-tcp" | "modbus-rtu" | "opcua" (validated by ConfigLoader).</summary>
+    /// <summary>"modbus-tcp" | "modbus-rtu" | "opcua" | "mc-3e" | "fins-tcp" | "fins-udp" (validated by ConfigLoader).</summary>
     [TomlPropertyName("protocol")]
     public string Protocol { get; set; } = "";
+
+    /// <summary>fins-tcp / fins-udp: true. Shares [[server.map]] with mc-3e.</summary>
+    public bool IsFins => Protocol is "fins-tcp" or "fins-udp";
 
     /// <summary>References a device name; must resolve or the config is invalid.</summary>
     [TomlPropertyName("device")]
@@ -482,9 +485,13 @@ public sealed class ServerConfig
     [TomlPropertyName("endpoint")]
     public string? Endpoint { get; set; }
 
-    /// <summary>mc-3e only: where MC devices live in the memory model (defaults: D→holding, M→coil, X→discrete).</summary>
+    /// <summary>mc-3e / fins: where protocol devices (areas) live in the memory model (mc-3e defaults: D→holding, M→coil, X→discrete; fins default: DM→holding).</summary>
     [TomlPropertyName("map")]
-    public List<McMapConfig> Map { get; set; } = [];
+    public List<ServerMapConfig> Map { get; set; } = [];
+
+    /// <summary>fins-tcp only: the server's FINS node number (1..254) used in the node address exchange. Default: last octet of bind (1 when that is 0 or 255).</summary>
+    [TomlPropertyName("node")]
+    public int? Node { get; set; }
 
     /// <summary>opcua only: named users (user name + password token).</summary>
     [TomlPropertyName("user")]
@@ -528,14 +535,14 @@ public sealed class OpcUaUserConfig
     public IDictionary<string, object?>? Extra { get; set; }
 }
 
-/// <summary>One [[server.map]] line: MC device code n ↔ table[offset + n], n in 0..count-1.</summary>
-public sealed class McMapConfig
+/// <summary>One [[server.map]] line: MC device / FINS area n ↔ table[offset + n], n in 0..count-1.</summary>
+public sealed class ServerMapConfig
 {
-    /// <summary>Device code letters only ("D", "W", "ZR").</summary>
+    /// <summary>MC device code letters only ("D", "W", "ZR") or a FINS area ("DM", "CIO", "E0").</summary>
     [TomlPropertyName("device")]
     public string Device { get; set; } = "";
 
-    /// <summary>coil | discrete | holding | input; bitness must match the device.</summary>
+    /// <summary>coil | discrete | holding | input; bitness must match the device (FINS areas are holdingRegisters: words | read_only_words).</summary>
     [TomlPropertyName("kind")]
     public string Kind { get; set; } = "";
 

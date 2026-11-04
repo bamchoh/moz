@@ -42,6 +42,7 @@ karakuri（先代ツール）の反省を設計指針にしています:
 |---|---|---|
 | Modbus RTU (シリアル) | `Modbus.Rtu` 新 Runner (phase 5) | なし (codec 共有) |
 | MC プロトコル サーバ | `Mc.McServer` Runner + `Mc3EServer` ハンドラ (phase 13) | なし (`IDeviceAccess` を消費、`McMap` で割り当て) |
+| FINS サーバ | `Fins.FinsTcpServer` / `FinsUdpServer` Runner + `FinsServer` ハンドラ (phase 19) | なし (`IDeviceAccess` を消費、`FinsMap` で割り当て) |
 | クライアント (マスタ) | `Modbus` にリクエスト構築半分 + 新 Runner (phase 6) → phase 12 で `Moz.Client` に汎用化 | なし |
 | 新プロトコルのクライアント (MC, OPC UA クライアント, ...) | `IRemoteDevice` 実装 1 つ (phase 12 の `Moz.Mc` が例) + `[[client]]` のキー + `CliApp.BuildRemote` の case | なし (ループ・設定の骨格は共有) |
 | 新プロトコルのサーバ (MC サーバ, ...) | `IProtocolRunner` 実装 1 つ + `[[server]]` のキー + CLI の switch | なし (`IDeviceAccess` を消費) |
@@ -83,3 +84,4 @@ karakuri（先代ツール）の反省を設計指針にしています:
 16. OPC UA セキュア通信 (`server.security` = none / sign / sign-encrypt (Basic256Sha256)、`accept_untrusted` + `pki` の信頼リスト; クライアント側も `security` / `user` / `password` / `accept_untrusted` / `pki`) ← **完了**
 17. OPC UA の RSA 系ポリシー全種 (`<policy>:sign|sign-encrypt`: basic128rsa15 / basic256 / basic256sha256 / aes128-sha256-rsaoaep / aes256-sha256-rsapss; ECC は未対応) ← **完了**
 18. OPC UA 1.05 の RSA_DH ポリシー (`rsa-dh-aesgcm` / `rsa-dh-chachapoly`; 同じ RSA 証明書で動く。ECC 系は要望により対象外) ← **完了**
+19. オムロン FINS サーバ (`[[server]] protocol = "fins-tcp" | "fins-udp"`; `FinsServer` 純粋ハンドラ (0101 / 0102 / 0104) + TCP (ノード交換) / UDP ランナー、全エリアをワードテーブルへ写す `[[server.map]]`、既定 DM → holding) ← **完了**。次は Keyence KV ホストリンク、Siemens S7 の順

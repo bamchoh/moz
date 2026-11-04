@@ -11,6 +11,13 @@ namespace Moz.Logging;
 /// listener failure=Error. The future GUI subscribes by adding an
 /// <see cref="ILoggerProvider"/>.
 /// </summary>
+/// <summary>Process-wide connection ids ("c1", "c2", ...) for the TCP servers' log lines.</summary>
+public static class ConnectionCounter
+{
+    private static int _next;
+    public static int Increment() => Interlocked.Increment(ref _next);
+}
+
 public static class CommLog
 {
     /// <summary>EventIds, kept in a nested class so method names stay free.</summary>

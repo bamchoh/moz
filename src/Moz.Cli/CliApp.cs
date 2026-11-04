@@ -6,6 +6,7 @@ using Moz.Client;
 using Moz.Config;
 using Moz.Devices;
 using Moz.Logging;
+using Moz.Fins;
 using Moz.Mc;
 using Moz.Modbus.Client;
 using Moz.OpcUa;
@@ -211,6 +212,19 @@ public static class CliApp
                     device,
                     McMap.Merge(device, s.Map.Select(m => McMapOf(m, device))),
                     loggerFactory.CreateLogger($"moz.server.{s.Name}")),
+                "fins-tcp" => new FinsTcpServer(
+                    s.Name,
+                    new IPEndPoint(IPAddress.Parse(s.Bind!), s.Port),
+                    (byte)(s.Node ?? FinsTcp.DefaultNode(IPAddress.Parse(s.Bind!))),
+                    device,
+                    FinsMap.Merge(device, s.Map.Select(m => FinsMapOf(m, device))),
+                    loggerFactory.CreateLogger($"moz.server.{s.Name}")),
+                "fins-udp" => new FinsUdpServer(
+                    s.Name,
+                    new IPEndPoint(IPAddress.Parse(s.Bind!), s.Port),
+                    device,
+                    FinsMap.Merge(device, s.Map.Select(m => FinsMapOf(m, device))),
+                    loggerFactory.CreateLogger($"moz.server.{s.Name}")),
                 "modbus-rtu" => new RtuServer(
                     s.Name,
                     OpenSerialPort(s.SerialPort!, s.Baud, s.Parity, s.DataBits, s.StopBits),
@@ -288,7 +302,7 @@ public static class CliApp
         }
     }
 
-    private static McMap McMapOf(McMapConfig m, IDeviceAccess device)
+    private static McMap McMapOf(ServerMapConfig m, IDeviceAccess device)
     {
         if (!McDevice.TryFromCode(m.Device, out var dev))
         {
@@ -296,6 +310,16 @@ public static class CliApp
         }
         var table = LocalKinds.ToTable(m.Kind);
         return new McMap(dev, table, m.Offset, m.Count ?? device.Length(table) - m.Offset);
+    }
+
+    private static FinsMap FinsMapOf(ServerMapConfig m, IDeviceAccess device)
+    {
+        if (!FinsArea.TryFromCode(m.Device, out var area))
+        {
+            throw new InvalidOperationException($"invalid FINS area \"{m.Device}\" (already rejected by config validation)");
+        }
+        var table = LocalKinds.ToTable(m.Kind);
+        return new FinsMap(area, table, m.Offset, m.Count ?? device.Length(table) - m.Offset);
     }
 
     private static McEntry McEntryOf(string remote, int count, TableKind table, int localOffset) =>

@@ -101,7 +101,7 @@ count = 4               # フィールド配列 (省略: 1)
 [[variable]]
 name   = "motor"
 device = "plc-a"
-kind   = "holding"      # 構造体は holding | input のみ (coil/discrete はエラー)
+kind   = "holding"      # 構造体は words | read_only_words のみ (coil/discrete はエラー)
 offset = 100
 type   = "Motor"        # 語数 = 1 + 1 + 3 + 8 = 13
 count  = 2              # 構造体配列: 要素ごとに 13 ワードずつ並ぶ
@@ -119,7 +119,7 @@ value  = [{ speed = 10, on = true, label = "m0" }, { samples = [1.0, 2.0, 3.0, 4
 ```toml
 [[server]]
 name      = "sim-a"   # 必須、一意
-protocol  = "modbus-tcp"  # "modbus-tcp" | "modbus-rtu" | "opcua" | "mc-3e" (opcua / mc-3e は後節)
+protocol  = "modbus-tcp"  # "modbus-tcp" | "modbus-rtu" | "opcua" | "mc-3e" | "fins-tcp" | "fins-udp" (opcua / mc-3e / fins は後節)
 device    = "plc-a"   # 参照する device 名 (未宣言名はエラー)
 bind      = "127.0.0.1"  # TCP。省略: 127.0.0.1
 port      = 50200     # TCP。省略: 50200。0 は ephemeral (テスト/CI 用)
@@ -162,8 +162,30 @@ count  = 100             # W0..W99 (省略: offset からテーブルの残り�
 ```
 
 - 既定の割り当て: `D → holding 0..`、`M → coil 0..`、`X → discrete 0..` (各テーブルの全長)。`[[server.map]]` に同じコードを書くと置き換わり、他の既定は残る。割り当てのないデバイスへの要求は終了コード C05B
-- 検証: デバイスコードが既知、kind の種別がデバイスに一致、`offset + count` (count 省略時は残り全部、0 セルならエラー) がテーブル長以内、同じコードの重複、不明キー。`map` は mc-3e 以外の protocol では設定禁止
+- 検証: デバイスコードが既知、kind の種別がデバイスに一致、`offset + count` (count 省略時は残り全部、0 セルならエラー) がテーブル長以内、同じコードの重複、不明キー。`map` は mc-3e / fins 以外の protocol では設定禁止
 - `unit_ids` は MC には無く、無視される。終了コードやフレーム規則は docs/spec-mc.md
+
+### FINS (fins-tcp / fins-udp) サーバ (フェーズ 19)
+
+```toml
+[[server]]
+name     = "fins-a"
+protocol = "fins-tcp"    # "fins-tcp" (ノードアドレス交換あり) | "fins-udp" (1 データグラム = 1 フレーム) (docs/spec-fins.md)
+device   = "plc-a"
+bind     = "127.0.0.1"   # 省略: 127.0.0.1
+port     = 9600          # 省略: 50200 (FINS の標準は 9600 なので明示する)
+node     = 10            # fins-tcp のサーバノード 1..254 (省略: bind の末尾オクテット、0 / 255 なら 1)。fins-udp では不要
+
+[[server.map]]           # FINS エリア → メモリの割り当て (省略可)
+device = "CIO"           # DM | CIO | W | H | A | E0..E18 (EM バンク、16 進)
+kind   = "holding"       # words | read_only_words (エリアはワード構成なのでワードテーブルだけ)
+offset = 1000            # CIO 0 ↔ holding[1000]
+count  = 100             # CIO 0..99 (省略: offset からテーブルの残り全部)
+```
+
+- 既定の割り当ては `DM → holding 0..` (テーブル全長) だけ。他のエリアは `[[server.map]]` が無ければ終了コード 1101。ビットアクセス (`CIO 100.05`) は写し先ワードの中のビット
+- 検証: エリアが既知、`kind` が holding / input、範囲と重複は mc-3e と同じ。`node` は fins 以外の protocol では設定禁止、fins-udp では無視
+- `unit_ids` は無視される。コマンド・終了コード・FINS/TCP の枠は docs/spec-fins.md
 
 ## [[client]] — クライアント (マスタ): リモートスレーブのミラー
 
@@ -370,8 +392,9 @@ interval_ms = 500       # 100..3600000 (省略: 1000)
 | log.level | trace/debug/info/warn/error |
 | log.format | text/json |
 | server.parity | none/even/odd |
-| server.protocol | modbus-tcp / modbus-rtu / opcua / mc-3e (他はエラー) |
-| server.map[].device | 既知の MC デバイスコード (英字のみ)、同一 server 内で一意; mc-3e 以外では map 自体が禁止 |
+| server.protocol | modbus-tcp / modbus-rtu / opcua / mc-3e / fins-tcp / fins-udp (他はエラー) |
+| server.map[].device | 既知の MC デバイスコード (英字のみ) / FINS エリア (DM, CIO, W, H, A, E0..E18)、同一 server 内で一意; mc-3e / fins 以外では map 自体が禁止 |
+| server.node | 1 .. 254 (fins-tcp / fins-udp のみ; 省略: bind の末尾オクテット) |
 | server.map[].kind | coil / discrete / holding / input (デバイスの種別と一致) |
 | server.map[].offset + count | device の該当テーブル長以内 (count 省略時は残り全部、1 セル以上) |
 | server.anonymous | write / read / deny (opcua のみ; 省略: ユーザー無しなら write、ありなら deny) |

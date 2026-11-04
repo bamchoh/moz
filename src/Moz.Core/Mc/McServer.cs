@@ -168,9 +168,3 @@ public sealed class McServer : IProtocolRunner
         }
     }
 }
-
-internal static class ConnectionCounter
-{
-    private static int _next;
-    public static int Increment() => Interlocked.Increment(ref _next);
-}

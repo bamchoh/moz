@@ -148,6 +148,37 @@ public class CliTests : IDisposable
     }
 
     [Fact]
+    public async Task Validate_FinsServers_Exits0()
+    {
+        const string toml =
+            """
+            [[device]]
+            name = "plc1"
+
+            [[server]]
+            name = "fins-a"
+            protocol = "fins-tcp"
+            device = "plc1"
+            port = 9600
+            node = 10
+
+            [[server.map]]
+            device = "CIO"
+            kind = "holding"
+            offset = 10000
+            count = 100
+
+            [[server]]
+            name = "fins-b"
+            protocol = "fins-udp"
+            device = "plc1"
+            port = 9600
+            """;
+        var exit = await Moz.Cli.CliApp.Run(["validate", WriteFile("fins-server.toml", toml)]);
+        Assert.Equal(0, exit);
+    }
+
+    [Fact]
     public async Task Validate_McClient_Exits0()
     {
         const string toml =

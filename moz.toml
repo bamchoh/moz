@@ -202,6 +202,24 @@ device = "W"
 kind = "holding"
 offset = 500
 
+# FINS server (phase 19): plc-a as an Omron CPU unit. Default map: DM -> holding
+# (from 0); every other area needs a [[server.map]] (word tables only, bit
+# access addresses bits inside the words). FINS/TCP with node 10; add a
+# second [[server]] with protocol = "fins-udp" for UDP clients.
+[[server]]
+name = "fins-a"
+protocol = "fins-tcp"
+device = "plc-a"
+bind = "127.0.0.1"
+port = 9600
+node = 10
+
+[[server.map]]
+device = "CIO"
+kind = "holding"
+offset = 600
+count = 100
+
 # OPC UA example (phase 7): publish the plc-a variables as nodes.
 # Nodes live under Objects/plc-ua (ns=urn:moz:ua:ns).
 [[server]]

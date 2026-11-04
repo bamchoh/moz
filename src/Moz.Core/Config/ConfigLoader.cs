@@ -138,7 +138,7 @@ public static partial class ConfigLoader
 
     private static readonly string[] LogLevels = ["trace", "debug", "info", "warn", "error"];
     private static readonly string[] LogFormats = ["text", "json"];
-    private static readonly string[] Protocols = ["modbus-tcp", "modbus-rtu", "opcua", "mc-3e"];
+    private static readonly string[] Protocols = ["modbus-tcp", "modbus-rtu", "opcua", "mc-3e", "fins-tcp", "fins-udp"];
     private static readonly string[] ClientProtocols = ["modbus-tcp", "modbus-rtu", "mc-3e", "opcua"];
 
     private static void Validate(MozConfig config, string path, List<ConfigError> errors)
@@ -270,15 +270,31 @@ public static partial class ConfigLoader
             CheckSerial("server", server.Baud, server.Parity, server.DataBits, server.StopBits, server.IdleGapMs,
                 $"[server \"{server.Name}\"]", path, errors);
 
-            // mc-3e wiring (phase 13): device maps
+            // mc-3e (phase 13) and fins (phase 19) wiring: device / area maps, FINS node
+            var mappedDevice = config.Device.FirstOrDefault(d => d.Name == server.Device);
             if (server.Protocol == "mc-3e")
             {
-                ValidateMcMaps(server, config.Device.FirstOrDefault(d => d.Name == server.Device), path, errors);
+                ValidateMaps(server, mappedDevice, path, errors, ResolveMcDevice, "device code letters only, e.g. D, M, W, ZR");
+            }
+            else if (server.IsFins)
+            {
+                ValidateMaps(server, mappedDevice, path, errors, ResolveFinsArea, "DM|CIO|W|H|A|E0..E18");
             }
             else if (server.Map.Count > 0)
             {
                 errors.Add(new ConfigError(path,
-                    $"server.map is only valid for mc-3e servers, set on \"{server.Name}\" ({server.Protocol})"));
+                    $"server.map is only valid for mc-3e and fins servers, set on \"{server.Name}\" ({server.Protocol})"));
+            }
+            if (server.Node is { } node)
+            {
+                if (!server.IsFins)
+                {
+                    errors.Add(new ConfigError(path, $"server.node is only valid for fins servers, set on \"{server.Name}\" ({server.Protocol})"));
+                }
+                else
+                {
+                    CheckRange(node, "server.node", 1, 254, path, errors);
+                }
             }
         }
 
@@ -780,17 +796,26 @@ public static partial class ConfigLoader
     }
 
     /// <summary>[[server.map]]: known device code, kind of matching bitness, range within the device table, no duplicate codes.</summary>
-    private static void ValidateMcMaps(ServerConfig server, DeviceConfig? device, string path, List<ConfigError> errors)
+    /// <summary>The canonical code and bitness of an MC device / FINS area; null when unknown.</summary>
+    private static (string Code, bool IsBit)? ResolveMcDevice(string text) =>
+        Mc.McDevice.TryFromCode(text, out var dev) ? (dev.Code, dev.IsBit) : null;
+
+    private static (string Code, bool IsBit)? ResolveFinsArea(string text) =>
+        Fins.FinsArea.TryFromCode(text, out var area) ? (area.Code, false) : null;
+
+    /// <summary>[[server.map]] lines (mc-3e and fins): known code, unique, kind bitness matches, range within the device table.</summary>
+    private static void ValidateMaps(ServerConfig server, DeviceConfig? device, string path, List<ConfigError> errors,
+        Func<string, (string Code, bool IsBit)?> resolve, string hint)
     {
         var ctx = $"[server \"{server.Name}\"]";
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var map in server.Map)
         {
             CheckExtra(map.Extra, $"[[server.map]] on \"{server.Name}\"", path, errors);
-            if (!Mc.McDevice.TryFromCode(map.Device, out var dev))
+            if (resolve(map.Device) is not { } dev)
             {
                 errors.Add(new ConfigError(path,
-                    $"server.map device value \"{map.Device}\" is invalid (device code letters only, e.g. D, M, W, ZR) in {ctx}"));
+                    $"server.map device value \"{map.Device}\" is invalid ({hint}) in {ctx}"));
                 continue;
             }
             if (!seen.Add(dev.Code))
