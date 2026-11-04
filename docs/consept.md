@@ -33,6 +33,7 @@ karakuri（先代ツール）の反省を設計指針にしています:
 - **Devices 層**: シミュレート装置のメモリ空間。全プロトコル・OPC UA サーバ・将来の GUI が消費する唯一の表面が `IDeviceAccess`。型付き名前付き変数 (`VariableTable`) はこの上のフラットなオーバーレイ。構造体は設定読込時 (`VariableLayout`) にドット名の葉変数へ展開され、コア層は構造体を知らない
 - **コーデック層 (ModbusPdu)**: request PDU → メモリ操作 → response PDU を純関数で実装。ソケットがなくても単体テスト可能で、TCP/RTU/ASCII で共有される
 - **トランスポート層**: MBAP + TCP。RTU はこの層だけ置き換える（CRC16 + 3.5 文字アイドル + シリアル）
+- **起動 (`RunnerHost`)**: `IProtocolRunner.Ready` (サーバは listen 後に完了、既定は即完了) を使い、サーバ → 準備完了待ち → クライアント/スクリプトの順に起動する。最初に落ちたランナーで残りを止めて失敗を返す (`Task.WhenAll` は全員が終わるまで戻らないので `WhenAny` で監視)
 - **クライアント層 (`Moz.Client`)**: プロトコル非依存の poll/push ループ `ClientPoller` と、プロトコルが実装する `IRemoteDevice` (項目ごとのローカル範囲 + ビット列/ワード列の読み書き)。Modbus は `ModbusRemote` (+ `IMasterLink` で TCP/RTU)、MC プロトコルは `McRemote`、OPC UA は `OpcUaRemote` (ノード ↔ 型付き変数; 型変換はサーバ側の `UaValueCodec` をスクラッチ device 経由で再利用)。新プロトコルのクライアントは `IRemoteDevice` 1 つ + 設定キー + CLI の switch 1 行で足せる
 
 ## 将来の拡張と seam
@@ -58,7 +59,8 @@ karakuri（先代ツール）の反省を設計指針にしています:
 - DI コンテナ / リフレクション探索（factory switch は CLI の 1 箇所）
 - config ホットリロード（プロセス再起動で対応）
 - GUI・REST API・レジスタ編集 UI（別フェーズ）
-- TLS・認証・DB・トリミング/AOT
+- DB・トリミング/AOT
+- TLS・認証は Modbus/MC では対象外。OPC UA サーバのユーザー管理 (フェーズ 15) とセキュリティポリシー (フェーズ 16) は要望により実装
 - OpenTelemetry/メトリクス（通信ログに統一）
 
 ## 実装フェーズ
@@ -77,3 +79,5 @@ karakuri（先代ツール）の反省を設計指針にしています:
 12. クライアントの汎用化 + MC プロトコル (`Moz.Client.ClientPoller` / `IRemoteDevice`; `[[client]] protocol = "mc-3e"` で 3E フレーム・バイナリ・TCP のマスタ、`remote = "D100"` 表記) ← **完了**
 13. MC プロトコル サーバ (`[[server]] protocol = "mc-3e"`; `Mc3EServer` 純粋ハンドラ + `McServer` TCP ランナー、`[[server.map]]` でデバイス → メモリ割り当て、既定 D/M/X) ← **完了**
 14. OPC UA クライアント (`[[client]] protocol = "opcua"`; `node` ↔ `variable`、匿名 / None、周期 Read + Write) ← **完了**。サブスクリプション (MonitoredItem による変更通知) は後続フェーズ
+15. 起動順 (`RunnerHost`: サーバ → Ready → クライアント/スクリプト) と OPC UA サーバのユーザー管理 (`[[server.user]]` name/password/access、`anonymous`; SDK 2.0 の IdentityRegistry にユーザー名認証を登録、書込み権限はノードマネージャで判定) ← **完了**
+16. OPC UA セキュア通信 (`server.security` = none / sign / sign-encrypt (Basic256Sha256)、`accept_untrusted` + `pki` の信頼リスト; クライアント側も `security` / `user` / `password` / `accept_untrusted` / `pki`) ← **完了**

@@ -270,7 +270,7 @@ variable = "setpoint"
 - 値の変換は OPC UA サーバ側と同じ規則 (docs/spec-config.md の OPC UA 節の型対応: real ↔ Float、int ↔ Int16、date/dt ↔ DateTime、配列 ↔ 一次元配列 …)。ノードの型が変数型と合わないときは `err=BadTypeMismatch`、値域外は `err=BadOutOfRange` としてリモートの拒否扱い (poll は書かず、push は再送しない)。未知のノード・名前空間は `err=BadNodeIdUnknown`
 - `count` / `local_kind` / `local_offset` / `fc` / `remote_offset` / `remote` / `remote_unit` / `remote_addr` は opcua では設定禁止。逆に `node` / `variable` / `endpoint` は opcua 以外では禁止
 - `plc.getVariableStatus` の `"connected"` はセッションが確立していること
-- 接続失敗 (サーバ未起動、None エンドポイント無し、タイムアウト) は WARN ログ 1 行で次周期に再試行。同じ設定ファイル内の moz の OPC UA サーバに接続する場合、サーバの起動が終わるまでの数周期は `BadServerHalted` で失敗し、その後つながる (正常)
+- 接続失敗 (サーバ未起動、None エンドポイント無し、タイムアウト) は WARN ログ 1 行で次周期に再試行。同じ設定ファイル内の moz のサーバに接続する場合は、起動順 (下記「起動順」) によりサーバの準備完了後にクライアントが動き始めるので起動時の失敗は出ない
 
 ### シリアル (modbus-rtu) マスタ
 
@@ -311,6 +311,10 @@ push (ローカル → リモート):
 - 要求は `fc` で指定した形そのまま (fc5/6 は 1 点固定の単一書き込み、fc15/16 は複数書き込み)。IndexRange/部分書き込みはない
 - 検証: fc が 5|6|15|16、count が fc の上限内、`local_kind` のビット/ワード整合、ローカル範囲が device の長さに収まること (push は毎回ローカルを読むため `push local_offset 20 (+4 cells) exceeds device ... length` で設定エラー)、不明キー
 - `local_kind` が discrete/input (読み取り専用テーブル) でもよい: poll と同様、ミラーはプロセス内部の書込みとして読み取り専用テーブルにも届く (Modbus マスタからの書込みだけが拒否される)
+
+## 起動順
+
+`moz <config>` は **サーバ (`[[server]]`) を先に起動し、すべてのサーバが準備完了 (listen 開始) になってからクライアント (`[[client]]`) とスクリプト (`[[script]]`) を起動する**。同じプロセス内のサーバを相手にする client (自己ポーリング) が起動直後に接続失敗を記録しないための順序。準備完了を 30 秒待っても揃わなければ WARN を出してクライアント/スクリプトを起動する。どれか 1 つのランナーが致命的に失敗 (ポート使用中、シリアルポートが開けない等) すると、残りを止めて exit 1。
 
 ## [[script]] — 周期スクリプト
 
@@ -370,6 +374,14 @@ interval_ms = 500       # 100..3600000 (省略: 1000)
 | server.map[].device | 既知の MC デバイスコード (英字のみ)、同一 server 内で一意; mc-3e 以外では map 自体が禁止 |
 | server.map[].kind | coil / discrete / holding / input (デバイスの種別と一致) |
 | server.map[].offset + count | device の該当テーブル長以内 (count 省略時は残り全部、1 セル以上) |
+| server.anonymous | write / read / deny (opcua のみ; 省略: ユーザー無しなら write、ありなら deny) |
+| server.user[].name / password | 必須 (name は一意); opcua 以外では user 自体が禁止 |
+| server.user[].access | read / write (省略: write) |
+| server.security | none / sign / sign-encrypt を 1 つ以上、重複なし (opcua のみ; 省略: ["none"]) |
+| server.accept_untrusted / pki | opcua のみ (省略: true / 実行ファイル隣の pki-<name>) |
+| client.security | none / sign / sign-encrypt (opcua のみ; 省略: none) |
+| client.user / password | 両方そろえて指定 (opcua のみ) |
+| client.accept_untrusted / pki | opcua のみ (省略: true / 一時フォルダ) |
 
 - device 名・server 名・struct 名はそれぞれ重複禁止（種類が違えば可）
 - `[[device]]` が 0 件でも `[[server]]` が 0 件でも起動する（何も動かないだけでエラーではない）
@@ -427,7 +439,7 @@ endpoint = "opc.tcp://127.0.0.1:4840"  # 必須 (opc.tcp URL、bind/port キー�
 - ノード構成: `Objects/<device名>/<変数名>` (ns=urn:moz:ua:ns、フォルダの BrowseName=device 名、変数ノードは `s=<変数名>`)。`[[variable]]` 宣言分がすべて公開される
 - 構造体変数はフォルダ (FolderType) になり、葉がその配下に並ぶ: `Objects/<device名>/motor/speed` (NodeId は葉の完全名 `s=motor.speed`、BrowseName は末尾の `speed`)。ネストは入れ子のフォルダ、構造体配列は要素ごとのフォルダ `motors/[0]/on` (NodeId `s=motors[0].on`)
 - UA データ型の対応: bool→Boolean, int→Int16, uint→UInt16, dint→Int32, udint→UInt32, real→Float, lint→Int64, ulint→UInt64, string→String, time→Int32 (ms), tod→UInt32 (ms), date/dt→DateTime (1970 年より前の書込みは BadOutOfRange、date は UTC 0 時へ切り捨て)
-- セキュリティ: None ポリシー + 匿名のみ (karakuri 準拠)。証明書は自己署名を pki-<name> フォルダに自動作成
+- セキュリティ: 既定は None ポリシー + 匿名。ユーザー管理は下記「ユーザー管理」、セキュリティポリシーと証明書は「セキュア通信」節。証明書は自己署名を pki フォルダに自動作成
 - **ServerSecurityPolicy.SecurityMode は必須** (SDK 2.0 の既定値は Invalid で、未設定だと全 OPN が黙って失敗する — スパイクで確認済み)
 - 読み取りはノード値 (device の Watch で常に最新)、書き込みは VariableTable 経由。ステータス: Variant の型が DataType と違う → BadTypeMismatch、値域外 → BadOutOfRange、input/discrete 上の変数 → BadNotWritable。int/uint ノードの Variant は Int16/UInt16 (DataType と一致)
 - device 側の変更は Watch で node.Value へ反映 → サブスクライブ中のクライアントに通知される
@@ -439,4 +451,51 @@ endpoint = "opc.tcp://127.0.0.1:4840"  # 必須 (opc.tcp URL、bind/port キー�
 - **外部クライアント検証済み** (asyncua): browse (asyncua のパス表記では `Objects/plc--a/temperature`; `-` がエスケープされる)、read (スクリプト周期書込み値が UA 経由でも追従)、write (`42.5` → device → Modbus マスタへも反映)。in-process SDK クライアントでも read / 全スカラ型の write / device 変更のノード反映を回帰テストで担保
 - **タイムスタンプ/ステータス付き書き込み**: asyncua の `write_value()` や UAExpert が送る SourceTimestamp 付き書込みも受理する (値だけ採用、タイムスタンプとステータスは無視)。ノードの AccessLevel/UserAccessLevel に StatusWrite|TimestampWrite を立てていないと SDK が BadUserAccessDenied を返す — 回帰テストで pin
 - **クライアント通知**: device 変更 → Watch → node.Value 更新 → publish → in-process クライアントの MonitoredItem に新値が届くまでを回帰テスト済み
-- **匿名ユーザーの書込み**: 全ノードが全ユーザーに読み書きを許可する (moz はアクセス制御を持たない)。in-process SDK クライアントの書込みも回帰テスト済み
+- **匿名ユーザーの書込み**: ユーザーを宣言しない限り、全ノードが匿名セッションに読み書きを許可する (フェーズ 7 の挙動)。ユーザー管理はフェーズ 15 で追加 (下記)
+
+### ユーザー管理 (フェーズ 15)
+
+```toml
+[[server]]
+name      = "ua-a"
+protocol  = "opcua"
+device    = "plc-a"
+endpoint  = "opc.tcp://127.0.0.1:4840"
+anonymous = "read"       # write | read | deny。省略: ユーザー未宣言なら write、宣言ありなら deny
+
+[[server.user]]
+name     = "operator"    # 必須、同一 server 内で一意
+password = "op-pass"     # 必須。設定ファイルにそのまま書く (シミュレータ用途; 比較は固定時間)
+access   = "write"       # read | write (省略: write)
+
+[[server.user]]
+name     = "viewer"
+password = "view-pass"
+access   = "read"
+```
+
+- ユーザーは UserName トークン (パスワードはサーバ証明書で暗号化して送られるので None チャネルでも平文では流れない) で認証する。未知のユーザー・パスワード不一致は ActivateSession が `BadUserAccessDenied` で失敗する
+- `anonymous = "deny"` のサーバは Anonymous トークンポリシーを出さないので匿名の ActivateSession は失敗する。`"read"` は読み取りとサブスクリプションのみ
+- `access = "read"` のユーザー (および `anonymous = "read"`) の Write は `BadUserAccessDenied` (値は変わらない)。読み取りの可否はノード単位では変えられない (全ノード同じ)
+- `user` / `anonymous` は opcua 以外の protocol では設定禁止。ユーザー名の重複、空の name / password、access の不正値は設定エラー
+- moz 自身の OPC UA クライアントからユーザーで接続するには `[[client]]` の `user` / `password` (セキュア通信節)
+
+### セキュア通信 (フェーズ 16)
+
+```toml
+[[server]]
+name     = "ua-a"
+protocol = "opcua"
+device   = "plc-a"
+endpoint = "opc.tcp://127.0.0.1:4840"
+security = ["none", "sign", "sign-encrypt"]   # 出すエンドポイント (省略: ["none"])。sign / sign-encrypt は Basic256Sha256
+accept_untrusted = true                        # 省略: true。false なら trusted/certs にある証明書のクライアントだけ受け付ける
+pki      = "pki/ua-a"                          # 省略: 実行ファイルの隣の pki-<name>。config からの相対パス
+```
+
+- `security` の各値が 1 つのエンドポイントになる: `none` = SecurityPolicy None / MessageSecurityMode None、`sign` = Basic256Sha256 / Sign、`sign-encrypt` = Basic256Sha256 / SignAndEncrypt。1 つ以上、重複不可。`none` を含めなければ平文の接続はできない
+- サーバ証明書は自己署名を `<pki>/own` に自動生成する (CN=moz-<name>)。クライアント側は通常「信頼する」操作が必要 (UAExpert 等)
+- `accept_untrusted = false` のとき、`<pki>/trusted/certs` に無いクライアント証明書は `BadSecurityChecksFailed` で拒否され、その証明書は `<pki>/rejected/certs` に保存される。そのファイルを `trusted/certs` へ移せば次の接続から受け付ける (再起動不要)。`none` エンドポイントではクライアント証明書を検証しない
+- 発行者 (CA) チェーンは `<pki>/issuer/certs`。CRL、証明書の有効期限ポリシー、GDS は未対応
+- `[[client]] protocol = "opcua"` 側のキー: `security = "none" | "sign" | "sign-encrypt"` (省略: none; サーバがそのエンドポイントを出していなければ接続エラー `offers no SecurityPolicy ...`)、`user` / `password` (UserName トークン; 片方だけはエラー)、`accept_untrusted` (省略: true)、`pki` (省略: 一時フォルダ `moz-ua-client/<client名>`)。クライアント証明書も自己署名で自動生成される
+- `security` / `accept_untrusted` / `pki` は opcua 以外の protocol では設定禁止 (server / client とも)

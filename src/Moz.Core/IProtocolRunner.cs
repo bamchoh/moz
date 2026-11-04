@@ -15,4 +15,11 @@ public interface IProtocolRunner
     /// Returning normally on cancellation is expected behavior, not an error.
     /// </summary>
     Task RunAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Completes once the runner is serving (a server is listening); faults
+    /// when startup failed. Clients and scripts start after every server's
+    /// Ready (<see cref="RunnerHost"/>). Default: ready immediately.
+    /// </summary>
+    Task Ready => Task.CompletedTask;
 }

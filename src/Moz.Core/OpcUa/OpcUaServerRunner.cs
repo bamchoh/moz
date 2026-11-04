@@ -26,14 +26,17 @@ public sealed class OpcUaServerRunner : IProtocolRunner
     private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private MozUaServer? _server;
 
+    private readonly OpcUaServerOptions _options;
+
     public OpcUaServerRunner(string name, string endpoint, Device device,
-        VariableTable variables, ILogger logger)
+        VariableTable variables, ILogger logger, OpcUaServerOptions? options = null)
     {
         Name = name;
         _endpoint = endpoint;
         _device = device;
         _variables = variables;
         _logger = logger;
+        _options = options ?? OpcUaServerOptions.Default;
     }
 
     public string Name { get; }
@@ -57,7 +60,7 @@ public sealed class OpcUaServerRunner : IProtocolRunner
             var instance = new ApplicationInstance(Config, telemetry);
             await instance.CheckApplicationInstanceCertificatesAsync(true, 2048, CancellationToken.None);
 
-            _server = new MozUaServer(_device, _variables);
+            _server = new MozUaServer(_device, _variables, _options, _logger);
             await instance.StartAsync(_server, ct);
         }
         catch (Exception ex)
@@ -107,7 +110,7 @@ public sealed class OpcUaServerRunner : IProtocolRunner
                 $"invalid opcua endpoint \"{_endpoint}\" (config validation reports this earlier)");
         }
 
-        var pkiRoot = Path.Combine(AppContext.BaseDirectory, "pki-" + Name);
+        var pkiRoot = _options.Pki ?? Path.Combine(AppContext.BaseDirectory, "pki-" + Name);
         var config = new ApplicationConfiguration(telemetry)
         {
             ApplicationName = $"moz-{Name}",
@@ -138,7 +141,7 @@ public sealed class OpcUaServerRunner : IProtocolRunner
                     StoreType = CertificateStoreType.Directory,
                     StorePath = Path.Combine(pkiRoot, "rejected"),
                 },
-                AutoAcceptUntrustedCertificates = true,
+                AutoAcceptUntrustedCertificates = _options.AcceptUntrusted,
                 RejectSHA1SignedCertificates = false,
                 MinimumCertificateKeySize = 2048,
             },
@@ -146,20 +149,36 @@ public sealed class OpcUaServerRunner : IProtocolRunner
             ServerConfiguration = new Opc.Ua.ServerConfiguration
             {
                 BaseAddresses = [_endpoint],
-                SecurityPolicies =
-                [
-                    new ServerSecurityPolicy
-                    {
-                        SecurityPolicyUri = SecurityPolicies.None,
-                        SecurityMode = MessageSecurityMode.None,
-                    },
-                ],
-                UserTokenPolicies = [new UserTokenPolicy(UserTokenType.Anonymous)],
+                SecurityPolicies = _options.Policies.Select(sec =>
+                {
+                    var (uri, mode) = sec.ToSdk();
+                    return new ServerSecurityPolicy { SecurityPolicyUri = uri, SecurityMode = mode };
+                }).ToArray(),
+                UserTokenPolicies = UserTokenPolicies(_options),
                 MinRequestThreadCount = 1,
                 MaxRequestThreadCount = 4,
             },
         };
         return config;
+    }
+
+    /// <summary>
+    /// Anonymous is offered unless denied; UserName is offered when users
+    /// exist, with its own security policy so the password travels encrypted
+    /// even on a SecurityPolicy None channel.
+    /// </summary>
+    private static UserTokenPolicy[] UserTokenPolicies(OpcUaServerOptions options)
+    {
+        var policies = new List<UserTokenPolicy>();
+        if (options.Anonymous != OpcUaAccess.Deny)
+        {
+            policies.Add(new UserTokenPolicy(UserTokenType.Anonymous));
+        }
+        if (options.Users.Count > 0)
+        {
+            policies.Add(new UserTokenPolicy(UserTokenType.UserName) { SecurityPolicyUri = SecurityPolicies.Basic256Sha256 });
+        }
+        return [.. policies];
     }
 }
 
@@ -167,15 +186,49 @@ public sealed class OpcUaServerRunner : IProtocolRunner
 /// The UA server subclass wiring moz's node manager. The variable namespace:
 /// one folder per device, nodes <c>ns=&lt;SDK-assigned&gt;;s=&lt;variable name&gt;</c>.
 /// </summary>
-internal sealed class MozUaServer(Device device, VariableTable variables) : StandardServer(OpcUaTelemetry.Telemetry)
+internal sealed class MozUaServer(Device device, VariableTable variables, OpcUaServerOptions options, ILogger logger)
+    : StandardServer(OpcUaTelemetry.Telemetry)
 {
     protected override IMasterNodeManager CreateMasterNodeManager(
         IServerInternal server, ApplicationConfiguration configuration)
     {
         // 2.0: async node managers are the FIRST-class list — the sync
         // overload never drives CreateAddressSpaceAsync (spike finding).
-        var nodeManager = new MozNodeManager(server, configuration, device, variables,
+        var nodeManager = new MozNodeManager(server, configuration, device, variables, options,
             OpcUaTelemetry.Telemetry.CreateLogger<MozNodeManager>());
         return new MasterNodeManager(server, configuration, null, [nodeManager], []);
+    }
+
+    /// <summary>
+    /// Register the user name authenticator (SDK 2.0 identity registry; the
+    /// legacy ImpersonateUser event is obsolete). Anonymous sessions are
+    /// handled by the SDK's default authenticator and gated by the token
+    /// policies (none offered when anonymous is denied).
+    /// </summary>
+    protected override void OnServerStarted(IServerInternal server)
+    {
+        base.OnServerStarted(server);
+        if (options.Users.Count > 0)
+        {
+            server.IdentityRegistry.Register(new UserNamePasswordAuthenticator(AuthenticateAsync));
+        }
+    }
+
+    private ValueTask<IUserIdentity> AuthenticateAsync(UserNameIdentityTokenHandler token, CancellationToken ct)
+    {
+        var user = options.Find(token.UserName ?? "");
+        if (user is null || !PasswordMatches(user.Password, token.DecryptedPassword))
+        {
+            logger.LogWarning("opcua session rejected: unknown user or wrong password ({User})", token.UserName);
+            throw new ServiceResultException(StatusCodes.BadUserAccessDenied);
+        }
+        logger.LogInformation("opcua session for user {User} ({Access})", user.Name, user.CanWrite ? "write" : "read");
+        return ValueTask.FromResult<IUserIdentity>(new UserIdentity(token));
+    }
+
+    private static bool PasswordMatches(string expected, ReadOnlySpan<byte> given)
+    {
+        var expectedBytes = System.Text.Encoding.UTF8.GetBytes(expected);
+        return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(expectedBytes, given);
     }
 }

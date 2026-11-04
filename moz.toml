@@ -209,3 +209,10 @@ name = "ua-a"
 protocol = "opcua"
 device = "plc-a"
 endpoint = "opc.tcp://127.0.0.1:48400"
+anonymous = "read"      # phase 15: anonymous sessions (e.g. ua-self-poll) may only read
+security = ["none", "sign-encrypt"]   # phase 16: plain endpoint for ua-self-poll, Basic256Sha256 for secure clients
+
+[[server.user]]         # writes need this user (UAExpert: user name token)
+name = "operator"
+password = "op-pass"
+access = "write"

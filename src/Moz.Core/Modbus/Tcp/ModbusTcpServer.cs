@@ -29,10 +29,15 @@ public sealed class ModbusTcpServer : IProtocolRunner
         _logger = logger;
     }
 
+    private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     public string Name { get; }
 
     /// <summary>The concrete endpoint after Start (set by <see cref="RunAsync"/>).</summary>
     public IPEndPoint? BoundEndpoint { get; private set; }
+
+    /// <summary>Completes once the listener is bound; faults when listening failed.</summary>
+    public Task Ready => _ready.Task;
 
     /// <summary>True while <see cref="RunAsync"/> is listening.</summary>
     public bool IsRunning { get; private set; }
@@ -48,9 +53,11 @@ public sealed class ModbusTcpServer : IProtocolRunner
         {
             // port occupied, permission denied, etc. — fatal for this runner
             _logger.ListenFailed(_bind.ToString(), ex.Message);
+            _ready.TrySetException(ex);
             throw;
         }
         BoundEndpoint = (IPEndPoint)listener.LocalEndpoint;
+        _ready.TrySetResult();
         IsRunning = true;
         _logger.LogInformation("listening {Name} on {Endpoint}", Name, BoundEndpoint);
 

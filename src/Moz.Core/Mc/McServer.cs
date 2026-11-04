@@ -31,10 +31,15 @@ public sealed class McServer : IProtocolRunner
         _logger = logger;
     }
 
+    private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     public string Name { get; }
 
     /// <summary>The concrete endpoint after Start (set by <see cref="RunAsync"/>).</summary>
     public IPEndPoint? BoundEndpoint { get; private set; }
+
+    /// <summary>Completes once the listener is bound; faults when listening failed.</summary>
+    public Task Ready => _ready.Task;
 
     public async Task RunAsync(CancellationToken ct)
     {
@@ -45,10 +50,13 @@ public sealed class McServer : IProtocolRunner
         }
         catch (Exception ex)
         {
+            // port occupied, permission denied, etc. — fatal for this runner
             _logger.ListenFailed(_bind.ToString(), ex.Message);
+            _ready.TrySetException(ex);
             throw;
         }
         BoundEndpoint = (IPEndPoint)listener.LocalEndpoint;
+        _ready.TrySetResult();
         _logger.LogInformation("listening {Name} on {Endpoint} (mc-3e)", Name, BoundEndpoint);
 
         var pending = new List<Task>();

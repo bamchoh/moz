@@ -216,6 +216,25 @@ public sealed class ClientConfig
     [TomlPropertyName("endpoint")]
     public string? Endpoint { get; set; }
 
+    /// <summary>opcua only: endpoint flavour to connect with: none | sign | sign-encrypt. Default (filled in Load): none.</summary>
+    [TomlPropertyName("security")]
+    public string? Security { get; set; }
+
+    /// <summary>opcua only: user name token (with password); anonymous when absent.</summary>
+    [TomlPropertyName("user")]
+    public string? User { get; set; }
+
+    [TomlPropertyName("password")]
+    public string? Password { get; set; }
+
+    /// <summary>opcua only: accept a server certificate that is not in the trusted store. Default (filled in Load): true.</summary>
+    [TomlPropertyName("accept_untrusted")]
+    public bool? AcceptUntrusted { get; set; }
+
+    /// <summary>opcua only: PKI folder, relative to the config file. Default: a per-client folder under the temp directory.</summary>
+    [TomlPropertyName("pki")]
+    public string? Pki { get; set; }
+
     /// <summary>Items address the remote by cells (Modbus / MC) rather than by a local variable (opcua).</summary>
     public bool IsCellBased => Protocol is "modbus-tcp" or "modbus-rtu" or "mc-3e";
 
@@ -466,6 +485,44 @@ public sealed class ServerConfig
     /// <summary>mc-3e only: where MC devices live in the memory model (defaults: D→holding, M→coil, X→discrete).</summary>
     [TomlPropertyName("map")]
     public List<McMapConfig> Map { get; set; } = [];
+
+    /// <summary>opcua only: named users (user name + password token).</summary>
+    [TomlPropertyName("user")]
+    public List<OpcUaUserConfig> User { get; set; } = [];
+
+    /// <summary>opcua only: what anonymous sessions may do: write | read | deny. Default (filled in Load): write without users, deny with users.</summary>
+    [TomlPropertyName("anonymous")]
+    public string? Anonymous { get; set; }
+
+    /// <summary>opcua only: endpoints to offer: none | sign | sign-encrypt (Basic256Sha256). Default (filled in Load): ["none"].</summary>
+    [TomlPropertyName("security")]
+    public List<string>? Security { get; set; }
+
+    /// <summary>opcua only: accept client certificates that are not in the trusted store. Default (filled in Load): true.</summary>
+    [TomlPropertyName("accept_untrusted")]
+    public bool? AcceptUntrusted { get; set; }
+
+    /// <summary>opcua only: PKI folder (own / trusted / issuer / rejected), relative to the config file. Default: pki-&lt;name&gt; next to the executable.</summary>
+    [TomlPropertyName("pki")]
+    public string? Pki { get; set; }
+
+    [TomlExtensionData]
+    public IDictionary<string, object?>? Extra { get; set; }
+}
+
+/// <summary>One [[server.user]] line of an opcua server.</summary>
+public sealed class OpcUaUserConfig
+{
+    [TomlPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    /// <summary>Compared as given (the simulator keeps it in the config file).</summary>
+    [TomlPropertyName("password")]
+    public string Password { get; set; } = "";
+
+    /// <summary>read | write. Default write.</summary>
+    [TomlPropertyName("access")]
+    public string Access { get; set; } = "write";
 
     [TomlExtensionData]
     public IDictionary<string, object?>? Extra { get; set; }

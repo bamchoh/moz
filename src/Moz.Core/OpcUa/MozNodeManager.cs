@@ -16,7 +16,7 @@ namespace Moz.OpcUa;
 /// request routing table to map our namespace to this manager (spike finding).
 /// </summary>
 internal sealed class MozNodeManager(IServerInternal server, ApplicationConfiguration configuration,
-    Device device, VariableTable variables, ILogger logger)
+    Device device, VariableTable variables, OpcUaServerOptions options, ILogger logger)
     : AsyncCustomNodeManager(server, configuration, NamespaceUri)
 {
     public const string NamespaceUri = "urn:moz:ua:ns";
@@ -163,6 +163,10 @@ internal sealed class MozNodeManager(IServerInternal server, ApplicationConfigur
     private ServiceResult OnWriteVariable(
         ISystemContext context, NodeState node, ref Variant value)
     {
+        if (!options.CanWrite((context as ServerSystemContext)?.OperationContext?.UserIdentity))
+        {
+            return ServiceResult.Create(StatusCodes.BadUserAccessDenied, "the session's user may not write");
+        }
         var name = node.NodeId.TryGetValue(out string? id) ? id : "";
         Variable v;
         try

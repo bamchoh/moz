@@ -60,6 +60,8 @@ moz moz.toml
 - [x] クライアントの汎用化 (`IRemoteDevice`) と MC プロトコル (3E バイナリ TCP) マスタ (`protocol = "mc-3e"`、`remote = "D100"`)
 - [x] MC プロトコル サーバ (`[[server]] protocol = "mc-3e"`、`[[server.map]]` で D/M/X 等をメモリに割り当て)
 - [x] OPC UA クライアント (`[[client]] protocol = "opcua"`、ノード ↔ 型付き変数、周期 Read + Write; サブスクリプションは今後)
+- [x] 起動順 (サーバの準備完了後にクライアント/スクリプト) と OPC UA サーバのユーザー管理 (`[[server.user]]`、匿名の write/read/deny)
+- [x] OPC UA セキュア通信 (`security = ["none", "sign", "sign-encrypt"]`、`accept_untrusted` と pki 信頼リスト; クライアント側も選択可)
 
 ## ライセンス
 

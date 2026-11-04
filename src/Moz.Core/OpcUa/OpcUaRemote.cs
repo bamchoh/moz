@@ -34,11 +34,13 @@ public sealed class OpcUaRemote : IRemoteDevice
     private readonly Item[] _polls;
     private readonly Item[] _pushes;
     private readonly ILogger _logger;
+    private readonly OpcUaClientOptions _options;
 
     private ApplicationConfiguration? _config;
     private ISession? _session;
 
-    public OpcUaRemote(string name, string endpoint, int timeoutMs, OpcUaEntry[] polls, OpcUaEntry[] pushes, ILogger logger)
+    public OpcUaRemote(string name, string endpoint, int timeoutMs, OpcUaEntry[] polls, OpcUaEntry[] pushes, ILogger logger,
+        OpcUaClientOptions? options = null)
     {
         _name = name;
         _endpoint = endpoint;
@@ -46,6 +48,7 @@ public sealed class OpcUaRemote : IRemoteDevice
         _polls = polls.Select(e => new Item(e)).ToArray();
         _pushes = pushes.Select(e => new Item(e)).ToArray();
         _logger = logger;
+        _options = options ?? OpcUaClientOptions.Default;
         Polls = polls.Select(e => e.Local).ToArray();
         Pushes = pushes.Select(e => e.Local).ToArray();
     }
@@ -78,7 +81,7 @@ public sealed class OpcUaRemote : IRemoteDevice
         {
             return;
         }
-        _config ??= await CreateConfigurationAsync(_name, ct);
+        _config ??= await CreateConfigurationAsync(_name, _options, ct);
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(_timeoutMs);
         ISession session;
@@ -86,10 +89,11 @@ public sealed class OpcUaRemote : IRemoteDevice
         {
             var discovery = await DiscoveryClient.CreateAsync(_config, new Uri(_endpoint), new DiagnosticsMasks(), timeoutCts.Token);
             var endpoints = await discovery.GetEndpointsAsync(null, null, [], [], timeoutCts.Token);
+            var (policyUri, mode) = _options.Security.ToSdk();
             EndpointDescription? description = null;
             foreach (var e in endpoints.Endpoints)
             {
-                if (e.SecurityPolicyUri == SecurityPolicies.None)
+                if (e.SecurityPolicyUri == policyUri && e.SecurityMode == mode)
                 {
                     description = e;
                     break;
@@ -97,12 +101,14 @@ public sealed class OpcUaRemote : IRemoteDevice
             }
             if (description is null)
             {
-                throw new IOException($"{_endpoint} offers no SecurityPolicy None endpoint (moz connects anonymously without security)");
+                throw new IOException($"{_endpoint} offers no SecurityPolicy {_options.Security} endpoint (client.security)");
             }
             var configured = new ConfiguredEndpoint(null, description, EndpointConfiguration.Create(_config));
+            IUserIdentity identity = _options.User is { Length: > 0 } user
+                ? new UserIdentity(user, System.Text.Encoding.UTF8.GetBytes(_options.Password ?? ""))
+                : new UserIdentity(new AnonymousIdentityToken());
             session = await new DefaultSessionFactory(OpcUaTelemetry.Telemetry).CreateAsync(
-                _config, configured, false, false, $"moz-{_name}", 60_000,
-                new UserIdentity(new AnonymousIdentityToken()), [], timeoutCts.Token);
+                _config, configured, false, false, $"moz-{_name}", 60_000, identity, [], timeoutCts.Token);
             await session.FetchNamespaceTablesAsync(timeoutCts.Token);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -256,10 +262,10 @@ public sealed class OpcUaRemote : IRemoteDevice
     /// lives in a per-client PKI folder under the temp directory and is
     /// created once.
     /// </summary>
-    private static async Task<ApplicationConfiguration> CreateConfigurationAsync(string name, CancellationToken ct)
+    private static async Task<ApplicationConfiguration> CreateConfigurationAsync(string name, OpcUaClientOptions options, CancellationToken ct)
     {
         var safe = string.Concat(name.Select(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' ? c : '_'));
-        var pki = Path.Combine(Path.GetTempPath(), "moz-ua-client", safe);
+        var pki = options.Pki ?? Path.Combine(Path.GetTempPath(), "moz-ua-client", safe);
         var config = new ApplicationConfiguration(OpcUaTelemetry.Telemetry)
         {
             ApplicationName = $"moz-{safe}",
@@ -278,7 +284,7 @@ public sealed class OpcUaRemote : IRemoteDevice
                 TrustedIssuerCertificates = new CertificateTrustList { StoreType = CertificateStoreType.Directory, StorePath = Path.Combine(pki, "issuer") },
                 TrustedPeerCertificates = new CertificateTrustList { StoreType = CertificateStoreType.Directory, StorePath = Path.Combine(pki, "trusted") },
                 RejectedCertificateStore = new CertificateTrustList { StoreType = CertificateStoreType.Directory, StorePath = Path.Combine(pki, "rejected") },
-                AutoAcceptUntrustedCertificates = true,
+                AutoAcceptUntrustedCertificates = options.AcceptUntrusted,
                 RejectSHA1SignedCertificates = false,
                 MinimumCertificateKeySize = 2048,
             },

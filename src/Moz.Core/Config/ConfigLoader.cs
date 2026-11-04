@@ -63,6 +63,12 @@ public static partial class ConfigLoader
         foreach (var server in config.Server)
         {
             server.Bind = string.IsNullOrWhiteSpace(server.Bind) ? "127.0.0.1" : server.Bind;
+            if (server.Protocol == "opcua")
+            {
+                server.Anonymous ??= server.User.Count > 0 ? "deny" : "write";
+                server.Security ??= ["none"];
+                server.AcceptUntrusted ??= true;
+            }
         }
         foreach (var client in config.Client)
         {
@@ -94,6 +100,11 @@ public static partial class ConfigLoader
                     push.RemoteOffset ??= 0;
                     push.LocalKind ??= PushConfig.DefaultLocalKind(push.Fc.Value);
                 }
+            }
+            else if (client.Protocol == "opcua")
+            {
+                client.Security ??= "none";
+                client.AcceptUntrusted ??= true;
             }
             else if (client.Protocol == "mc-3e")
             {
@@ -234,6 +245,28 @@ public static partial class ConfigLoader
                 errors.Add(new ConfigError(path,
                     $"server.endpoint is only valid for the opcua protocol, set on \"{server.Name}\" ({server.Protocol})"));
             }
+
+            // opcua user management (phase 15) and secure channels (phase 16)
+            if (server.Protocol == "opcua")
+            {
+                ValidateOpcUaUsers(server, path, errors);
+                ValidateOpcUaSecurity(server, path, errors);
+            }
+            else
+            {
+                if (server.User.Count > 0)
+                {
+                    errors.Add(new ConfigError(path, $"server.user is only valid for opcua servers, set on \"{server.Name}\" ({server.Protocol})"));
+                }
+                foreach (var (set, key) in new[] { (server.Anonymous is not null, "anonymous"), (server.Security is not null, "security"),
+                                                   (server.AcceptUntrusted is not null, "accept_untrusted"), (server.Pki is not null, "pki") })
+                {
+                    if (set)
+                    {
+                        errors.Add(new ConfigError(path, $"server.{key} is only valid for opcua servers, set on \"{server.Name}\" ({server.Protocol})"));
+                    }
+                }
+            }
             CheckSerial("server", server.Baud, server.Parity, server.DataBits, server.StopBits, server.IdleGapMs,
                 $"[server \"{server.Name}\"]", path, errors);
 
@@ -338,6 +371,15 @@ public static partial class ConfigLoader
                     errors.Add(new ConfigError(path,
                         $"client.serial_port is only valid for serial protocols (modbus-rtu), set in {ctx} ({client.Protocol})"));
                 }
+                CheckChoice(client.Security, ["none", "sign", "sign-encrypt"], "client.security", path, errors, defaultIs: "none", context: ctx);
+                if (client.User is not null && string.IsNullOrEmpty(client.Password))
+                {
+                    errors.Add(new ConfigError(path, $"client.password is required when client.user is set in {ctx}"));
+                }
+                if (client.Password is not null && string.IsNullOrEmpty(client.User))
+                {
+                    errors.Add(new ConfigError(path, $"client.user is required when client.password is set in {ctx}"));
+                }
             }
             else
             {
@@ -353,9 +395,17 @@ public static partial class ConfigLoader
                         $"client.serial_port is only valid for serial protocols (modbus-rtu), set in {ctx} ({client.Protocol})"));
                 }
             }
-            if (client.Protocol != "opcua" && client.Endpoint is not null)
+            if (client.Protocol != "opcua")
             {
-                errors.Add(new ConfigError(path, $"client.endpoint is only valid for opcua clients, set in {ctx} ({client.Protocol})"));
+                foreach (var (set, key) in new[] { (client.Endpoint is not null, "endpoint"), (client.Security is not null, "security"),
+                                                   (client.User is not null, "user"), (client.Password is not null, "password"),
+                                                   (client.AcceptUntrusted is not null, "accept_untrusted"), (client.Pki is not null, "pki") })
+                {
+                    if (set)
+                    {
+                        errors.Add(new ConfigError(path, $"client.{key} is only valid for opcua clients, set in {ctx} ({client.Protocol})"));
+                    }
+                }
             }
             CheckSerial("client", client.Baud, client.Parity, client.DataBits, client.StopBits, client.IdleGapMs, ctx, path, errors);
 
@@ -681,6 +731,45 @@ public static partial class ConfigLoader
             return null;
         }
         return table;
+    }
+
+    /// <summary>[[server.user]]: name and password present, access read|write, unique names; server.anonymous write|read|deny.</summary>
+    private static void ValidateOpcUaUsers(ServerConfig server, string path, List<ConfigError> errors)
+    {
+        var ctx = $"[server \"{server.Name}\"]";
+        CheckChoice(server.Anonymous, ["write", "read", "deny"], "server.anonymous", path, errors, defaultIs: null, context: ctx);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var user in server.User)
+        {
+            CheckExtra(user.Extra, $"[[server.user]] on \"{server.Name}\"", path, errors);
+            Require(user.Name, "server.user.name", path, errors, ctx);
+            Require(user.Password, "server.user.password", path, errors, $"{ctx} user \"{user.Name}\"");
+            CheckChoice(user.Access, ["read", "write"], "server.user.access", path, errors, defaultIs: "write", context: ctx);
+            if (user.Name.Length > 0 && !seen.Add(user.Name))
+            {
+                errors.Add(new ConfigError(path, $"duplicate server.user name \"{user.Name}\" in {ctx}"));
+            }
+        }
+    }
+
+    /// <summary>server.security: one or more of none | sign | sign-encrypt, no duplicates.</summary>
+    private static void ValidateOpcUaSecurity(ServerConfig server, string path, List<ConfigError> errors)
+    {
+        var ctx = $"[server \"{server.Name}\"]";
+        if (server.Security is { Count: 0 })
+        {
+            errors.Add(new ConfigError(path, $"server.security must list at least one of none|sign|sign-encrypt in {ctx}"));
+            return;
+        }
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var value in server.Security ?? [])
+        {
+            CheckChoice(value, ["none", "sign", "sign-encrypt"], "server.security", path, errors, defaultIs: "none", context: ctx);
+            if (!seen.Add(value))
+            {
+                errors.Add(new ConfigError(path, $"duplicate server.security value \"{value}\" in {ctx}"));
+            }
+        }
     }
 
     /// <summary>[[server.map]]: known device code, kind of matching bitness, range within the device table, no duplicate codes.</summary>

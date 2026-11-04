@@ -79,4 +79,122 @@ public class OpcUaConfigTests : IDisposable
         Assert.False(r.Ok);
         Assert.Contains(r.Errors, e => e.Message.Contains("only valid for the opcua protocol"));
     }
+
+    // --- user management (phase 15) ---------------------------------------------------
+
+    private const string Users =
+        """
+        [[device]]
+        name = "plc1"
+
+        [[server]]
+        name = "ua-a"
+        protocol = "opcua"
+        device = "plc1"
+        endpoint = "opc.tcp://127.0.0.1:48400"
+
+        [[server.user]]
+        name = "operator"
+        password = "op-pass"
+        access = "write"
+
+        [[server.user]]
+        name = "viewer"
+        password = "view-pass"
+        access = "read"
+        """;
+
+    [Fact]
+    public void Users_Load_AnonymousDefaultsToDeny()
+    {
+        var r = Load("users.toml", Users);
+        Assert.True(r.Ok, string.Join("\n", r.Errors));
+        var s = r.Config!.Server[0];
+        Assert.Equal(2, s.User.Count);
+        Assert.Equal(("operator", "op-pass", "write"), (s.User[0].Name, s.User[0].Password, s.User[0].Access));
+        Assert.Equal("read", s.User[1].Access);
+        Assert.Equal("deny", s.Anonymous);
+    }
+
+    [Fact]
+    public void NoUsers_AnonymousDefaultsToWrite_AccessDefaultsToWrite()
+    {
+        var r = Load("nousers.toml", Base);
+        Assert.True(r.Ok, string.Join("\n", r.Errors));
+        Assert.Equal("write", r.Config!.Server[0].Anonymous);
+        var r2 = Load("defaccess.toml", Users.Replace("access = \"write\"", ""));
+        Assert.True(r2.Ok, string.Join("\n", r2.Errors));
+        Assert.Equal("write", r2.Config!.Server[0].User[0].Access);
+    }
+
+    [Theory]
+    [InlineData("name = \"viewer\"", "name = \"operator\"", "duplicate server.user name \"operator\"")]
+    [InlineData("name = \"viewer\"", "name = \"\"", "server.user.name is required")]
+    [InlineData("password = \"view-pass\"", "password = \"\"", "server.user.password is required")]
+    [InlineData("access = \"read\"", "access = \"admin\"", "server.user.access value \"admin\" is invalid")]
+    [InlineData("endpoint = \"opc.tcp://127.0.0.1:48400\"", "endpoint = \"opc.tcp://127.0.0.1:48400\"\nanonymous = \"maybe\"", "server.anonymous value \"maybe\" is invalid")]
+    [InlineData("protocol = \"opcua\"", "protocol = \"modbus-tcp\"", "server.user is only valid for opcua servers")]
+    public void Users_Invalid_Fail(string find, string replace, string why)
+    {
+        var r = Load("bad.toml", Users.Replace(find, replace));
+        Assert.False(r.Ok, "expected: " + why);
+        Assert.Contains(why, string.Join("\n", r.Errors.Select(e => e.Message)));
+    }
+
+    [Fact]
+    public void Anonymous_OnNonOpcUa_Fails()
+    {
+        var r = Load("anon.toml", Base.Replace("protocol = \"opcua\"", "protocol = \"modbus-tcp\"")
+            .Replace("endpoint = \"opc.tcp://127.0.0.1:48400\"", "anonymous = \"read\""));
+        Assert.False(r.Ok);
+        Assert.Contains("server.anonymous is only valid for opcua servers", string.Join("\n", r.Errors.Select(e => e.Message)));
+    }
+
+    // --- secure channels (phase 16) ------------------------------------------------------
+
+    [Fact]
+    public void Security_Defaults_NoneAndAcceptUntrusted()
+    {
+        var r = Load("secdef.toml", Base);
+        Assert.True(r.Ok, string.Join("\n", r.Errors));
+        var s = r.Config!.Server[0];
+        Assert.Equal(["none"], s.Security);
+        Assert.True(s.AcceptUntrusted);
+        Assert.Null(s.Pki);
+    }
+
+    [Fact]
+    public void Security_Loads()
+    {
+        var r = Load("sec.toml", Base + "\nsecurity = [\"sign\", \"sign-encrypt\"]\naccept_untrusted = false\npki = \"pki/ua-a\"\n");
+        Assert.True(r.Ok, string.Join("\n", r.Errors));
+        var s = r.Config!.Server[0];
+        Assert.Equal(["sign", "sign-encrypt"], s.Security);
+        Assert.False(s.AcceptUntrusted);
+        Assert.Equal("pki/ua-a", s.Pki);
+    }
+
+    [Theory]
+    [InlineData("security = [\"tls\"]", "server.security value \"tls\" is invalid")]
+    [InlineData("security = []", "server.security must list at least one")]
+    [InlineData("security = [\"none\", \"none\"]", "duplicate server.security value \"none\"")]
+    public void Security_Invalid_Fail(string line, string why)
+    {
+        var r = Load("secbad.toml", Base + "\n" + line + "\n");
+        Assert.False(r.Ok, "expected: " + why);
+        Assert.Contains(why, string.Join("\n", r.Errors.Select(e => e.Message)));
+    }
+
+    [Theory]
+    [InlineData("security = [\"sign\"]", "server.security is only valid for opcua servers")]
+    [InlineData("accept_untrusted = false", "server.accept_untrusted is only valid for opcua servers")]
+    [InlineData("pki = \"x\"", "server.pki is only valid for opcua servers")]
+    public void Security_OnNonOpcUa_Fails(string line, string why)
+    {
+        var toml = Base.Replace("protocol = \"opcua\"", "protocol = \"modbus-tcp\"")
+            .Replace("endpoint = \"opc.tcp://127.0.0.1:48400\"", line);
+        var r = Load("secproto.toml", toml);
+        Assert.False(r.Ok, "expected: " + why);
+        Assert.Contains(why, string.Join("\n", r.Errors.Select(e => e.Message)));
+    }
 }

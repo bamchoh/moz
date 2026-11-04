@@ -146,7 +146,11 @@ public static class CliApp
             }
         }
 
-        var runners = new List<IProtocolRunner>();
+        var runners = new List<IProtocolRunner>(); // clients and scripts: started once the servers are ready
+        var servers = new List<IProtocolRunner>();
+
+        // paths in the config (scripts, pki folders) resolve relative to the config file
+        var configDir = Path.GetDirectoryName(Path.GetFullPath(result.File))!;
 
         // clients (phase 6/11/12): the generic poll/push loop (ClientPoller) over a
         // protocol-specific IRemoteDevice. Each poll/push range is also recorded as
@@ -155,7 +159,7 @@ public static class CliApp
         foreach (var c in config.Client)
         {
             var clientLogger = loggerFactory.CreateLogger($"moz.client.{c.Name}");
-            var poller = new ClientPoller(c.Name, BuildRemote(c, leafIndex[c.Device], clientLogger), c.IntervalMs, devices[c.Device], clientLogger);
+            var poller = new ClientPoller(c.Name, BuildRemote(c, leafIndex[c.Device], configDir, clientLogger), c.IntervalMs, devices[c.Device], clientLogger);
             runners.Add(poller);
             var deviceLinks = links.TryGetValue(c.Device, out var l) ? l : links[c.Device] = [];
             deviceLinks.AddRange(poller.Remote.Polls.Concat(poller.Remote.Pushes)
@@ -163,7 +167,6 @@ public static class CliApp
         }
 
         // periodic scripts (phase 4): paths resolve relative to the config file
-        var configDir = Path.GetDirectoryName(Path.GetFullPath(result.File))!;
         foreach (var s in config.Script)
         {
             var device = devices[s.Device];
@@ -180,7 +183,7 @@ public static class CliApp
         foreach (var s in config.Server)
         {
             var device = devices[s.Device];
-            runners.Add(s.Protocol switch
+            servers.Add(s.Protocol switch
             {
                 "modbus-tcp" => new ModbusTcpServer(
                     s.Name,
@@ -195,7 +198,13 @@ public static class CliApp
                     variableTables.TryGetValue(s.Device, out var vt)
                         ? vt
                         : new VariableTable(device, [], loggerFactory.CreateLogger($"moz.device.{s.Device}")),
-                    loggerFactory.CreateLogger($"moz.server.{s.Name}")),
+                    loggerFactory.CreateLogger($"moz.server.{s.Name}"),
+                    new OpcUaServerOptions(
+                        s.User.Select(u => new OpcUaUser(u.Name, u.Password, u.Access == "write")).ToArray(),
+                        s.Anonymous switch { "read" => OpcUaAccess.Read, "deny" => OpcUaAccess.Deny, _ => OpcUaAccess.Write },
+                        (s.Security ?? ["none"]).Select(v => OpcUaSecurityExtensions.Parse(v) ?? OpcUaSecurity.None).ToArray(),
+                        s.Pki is null ? null : Path.Combine(configDir, s.Pki),
+                        s.AcceptUntrusted ?? true)),
                 "mc-3e" => new McServer(
                     s.Name,
                     new IPEndPoint(IPAddress.Parse(s.Bind!), s.Port),
@@ -223,19 +232,15 @@ public static class CliApp
             cts.Cancel();
         };
 
-        var tasks = runners.Select(r => r.RunAsync(cts.Token)).ToArray();
-        logger.LogInformation("starting {Count} runner(s)", runners.Count);
-
         try
         {
-            await Task.WhenAll(tasks);
+            // servers first; clients/scripts once every server is ready (RunnerHost)
+            await RunnerHost.RunAsync(servers, runners, TimeSpan.FromSeconds(30), logger, cts.Token);
         }
         catch (Exception ex)
         {
-            // one runner failed fatally — propagate, report, exit
+            // one runner failed fatally — report, exit
             logger.LogError(ex, "runner failed: {Message}", ex.Message);
-            await cts.CancelAsync();
-            try { await Task.WhenAll(tasks); } catch { /* propagate first failure only */ }
             return 1;
         }
 
@@ -244,7 +249,7 @@ public static class CliApp
     }
 
     /// <summary>The ONE place a [[client]] protocol name becomes an IRemoteDevice.</summary>
-    private static IRemoteDevice BuildRemote(ClientConfig c, IReadOnlyDictionary<string, Variable> leaves, ILogger logger)
+    private static IRemoteDevice BuildRemote(ClientConfig c, IReadOnlyDictionary<string, Variable> leaves, string configDir, ILogger logger)
     {
         switch (c.Protocol)
         {
@@ -271,7 +276,12 @@ public static class CliApp
                 return new OpcUaRemote(c.Name, c.Endpoint!, c.TimeoutMs,
                     c.Poll.Select(p => new OpcUaEntry(OpcUaRemote.ParseNode(p.Node!), leaves[p.Variable!])).ToArray(),
                     c.Push.Select(p => new OpcUaEntry(OpcUaRemote.ParseNode(p.Node!), leaves[p.Variable!])).ToArray(),
-                    logger);
+                    logger,
+                    new OpcUaClientOptions(
+                        OpcUaSecurityExtensions.Parse(c.Security ?? "none") ?? OpcUaSecurity.None,
+                        c.User, c.Password,
+                        c.Pki is null ? null : Path.Combine(configDir, c.Pki),
+                        c.AcceptUntrusted ?? true));
             default:
                 throw new InvalidOperationException(
                     $"unknown client protocol \"{c.Protocol}\" (already rejected by config validation)");

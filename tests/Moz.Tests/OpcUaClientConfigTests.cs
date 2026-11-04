@@ -140,4 +140,68 @@ public class OpcUaClientConfigTests : IDisposable
         Assert.False(result.Ok, "expected a config error containing: " + why);
         Assert.Contains(why, Messages(result));
     }
+
+    // --- secure channels and user (phase 16) ----------------------------------------------
+
+    [Fact]
+    public void ClientSecurity_Defaults()
+    {
+        var c = Load("cdef.toml", Base).Config!.Client[0];
+        Assert.Equal("none", c.Security);
+        Assert.Null(c.User);
+        Assert.Null(c.Password);
+        Assert.True(c.AcceptUntrusted);
+        Assert.Null(c.Pki);
+    }
+
+    [Fact]
+    public void ClientSecurity_Loads()
+    {
+        var toml = Base.Replace("endpoint = \"opc.tcp://192.168.0.30:4840\"",
+            "endpoint = \"opc.tcp://192.168.0.30:4840\"\nsecurity = \"sign-encrypt\"\nuser = \"operator\"\npassword = \"op-pass\"\naccept_untrusted = false\npki = \"pki/ua1\"");
+        var r = Load("csec.toml", toml);
+        Assert.True(r.Ok, Messages(r));
+        var c = r.Config!.Client[0];
+        Assert.Equal(("sign-encrypt", "operator", "op-pass", false, "pki/ua1"), (c.Security, c.User, c.Password, c.AcceptUntrusted, c.Pki));
+    }
+
+    [Theory]
+    [InlineData("security = \"tls\"", "client.security value \"tls\" is invalid")]
+    [InlineData("user = \"operator\"", "client.password is required when client.user is set")]
+    [InlineData("password = \"x\"", "client.user is required when client.password is set")]
+    public void ClientSecurity_Invalid_Fail(string line, string why)
+    {
+        var toml = Base.Replace("endpoint = \"opc.tcp://192.168.0.30:4840\"", "endpoint = \"opc.tcp://192.168.0.30:4840\"\n" + line);
+        var r = Load("csecbad.toml", toml);
+        Assert.False(r.Ok, "expected: " + why);
+        Assert.Contains(why, Messages(r));
+    }
+
+    [Theory]
+    [InlineData("security = \"sign\"", "client.security is only valid for opcua clients")]
+    [InlineData("user = \"u\"\npassword = \"p\"", "client.user is only valid for opcua clients")]
+    [InlineData("accept_untrusted = false", "client.accept_untrusted is only valid for opcua clients")]
+    [InlineData("pki = \"x\"", "client.pki is only valid for opcua clients")]
+    public void ClientSecurity_OnModbus_Fails(string line, string why)
+    {
+        const string modbus =
+            """
+            [[device]]
+            name = "plc-mirror"
+            holding = 100
+
+            [[client]]
+            name = "p1"
+            device = "plc-mirror"
+            remote_addr = "192.168.0.10:502"
+
+            [[client.poll]]
+            remote_offset = 100
+            count = 2
+            local_offset = 0
+            """;
+        var r = Load("csecproto.toml", modbus.Replace("remote_addr = \"192.168.0.10:502\"", "remote_addr = \"192.168.0.10:502\"\n" + line));
+        Assert.False(r.Ok, "expected: " + why);
+        Assert.Contains(why, Messages(r));
+    }
 }
