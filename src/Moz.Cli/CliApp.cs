@@ -234,12 +234,13 @@ public static class CliApp
                     device,
                     KvMap.Merge(device, s.Map.Select(m => KvMapOf(m, device))),
                     loggerFactory.CreateLogger($"moz.server.{s.Name}")),
-                "enip" => new EnipServer(
+                "enip" or "enip-nj" => new EnipServer(
                     s.Name,
                     new IPEndPoint(IPAddress.Parse(s.Bind!), s.Port),
                     variableTables.TryGetValue(s.Device, out var enipVars)
                         ? enipVars
                         : new VariableTable(device, [], loggerFactory.CreateLogger($"moz.device.{s.Device}")),
+                    s.Protocol == "enip" ? CipDialect.Logix : CipDialect.OmronNj,
                     loggerFactory.CreateLogger($"moz.server.{s.Name}")),
                 "s7" => new S7TcpServer(
                     s.Name,

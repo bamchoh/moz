@@ -260,6 +260,17 @@ device = "plc-a"
 bind = "127.0.0.1"
 port = 44818
 
+# EtherNet/IP, Omron NJ dialect (phase 24): the same variables the way an NJ501
+# answers (CIP STRING, 2-byte BOOL, Tag Name Server). aphytcomm:
+# NSeries().connect_explicit("127.0.0.1") needs port 44818, so run this one
+# alone on 44818 or point the client at 44819.
+[[server]]
+name = "nj-a"
+protocol = "enip-nj"
+device = "plc-a"
+bind = "127.0.0.1"
+port = 44819
+
 # OPC UA example (phase 7): publish the plc-a variables as nodes.
 # Nodes live under Objects/plc-ua (ns=urn:moz:ua:ns).
 [[server]]

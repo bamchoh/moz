@@ -41,12 +41,14 @@ public class EnipConfigTests : IDisposable
         port = 44818
         """;
 
-    [Fact]
-    public void Enip_Loads()
+    [Theory]
+    [InlineData("enip")]
+    [InlineData("enip-nj")]
+    public void Enip_Loads(string protocol)
     {
-        var r = Load("enip.toml", Base);
+        var r = Load("enip.toml", Base.Replace("protocol = \"enip\"", $"protocol = \"{protocol}\""));
         Assert.True(r.Ok, Messages(r));
-        Assert.Equal(("enip", 44818), (r.Config!.Server[0].Protocol, r.Config.Server[0].Port));
+        Assert.Equal((protocol, 44818), (r.Config!.Server[0].Protocol, r.Config.Server[0].Port));
     }
 
     [Theory]

@@ -45,7 +45,7 @@ karakuri（先代ツール）の反省を設計指針にしています:
 | FINS サーバ | `Fins.FinsTcpServer` / `FinsUdpServer` Runner + `FinsServer` ハンドラ (phase 19) | なし (`IDeviceAccess` を消費、`FinsMap` で割り当て) |
 | KV ホストリンク サーバ | `Kv.KvServer` Runner + `KvHostLink` 行ハンドラ (phase 21) | なし (`IDeviceAccess` を消費、`KvMap` で割り当て) |
 | S7 サーバ | `S7.S7TcpServer` Runner (ISO-on-TCP) + `S7Server` PDU ハンドラ (phase 22) | なし (`IDeviceAccess` を消費、`S7Map` で割り当て) |
-| EtherNet/IP タグサーバ | `EtherNetIp.EnipServer` Runner (カプセル化) + `CipRouter` (phase 23) | なし (`VariableTable` を消費: タグ = 変数) |
+| EtherNet/IP タグサーバ | `EtherNetIp.EnipServer` Runner (カプセル化) + `CipRouter` (Logix 方言, phase 23) / `NjCipRouter` (Omron NJ 方言, phase 24)、共通部は `CipCommon` | なし (`VariableTable` を消費: タグ = 変数) |
 | クライアント (マスタ) | `Modbus` にリクエスト構築半分 + 新 Runner (phase 6) → phase 12 で `Moz.Client` に汎用化 | なし |
 | 新プロトコルのクライアント (MC, OPC UA クライアント, ...) | `IRemoteDevice` 実装 1 つ (phase 12 の `Moz.Mc` が例) + `[[client]]` のキー + `CliApp.BuildRemote` の case | なし (ループ・設定の骨格は共有) |
 | 新プロトコルのサーバ (MC サーバ, ...) | `IProtocolRunner` 実装 1 つ + `[[server]]` のキー + CLI の switch | なし (`IDeviceAccess` を消費) |
@@ -92,3 +92,4 @@ karakuri（先代ツール）の反省を設計指針にしています:
 21. キーエンス KV ホストリンク サーバ (`[[server]] protocol = "kv-hostlink"`; ASCII 行プロトコル、`CR` / `CQ` / `?K` / `?M` / `RD` / `RDS` / `WR` / `WRS` / `ST` / `RS`、`.U .S .D .L .H` 書式、`[[server.map]]` で DM/EM/FM/W/ZF/R/MR/LR/B を割り当て、既定 DM → words と R → bits) ← **完了**
 22. Siemens S7 サーバ (`[[server]] protocol = "s7"`; ISO-on-TCP + S7comm、Setup Communication (PDU ≤ 960)、Read/Write Var の複数項目 (BIT/BYTE/WORD/DWORD、奇数バイト、ビット)、SZL 0011/001C は CPU 315-2 PN/DP 相当、`[[server.map]]` で DB n / M / I / Q をワードテーブルへ (バイト b ↔ words[b/2])、既定 DB1 → words) ← **完了**
 23. EtherNet/IP タグサーバ (`[[server]] protocol = "enip"`; カプセル化 (RegisterSession / SendRRData / SendUnitData / ListIdentity)、CIP Read/Write Tag (+ Fragmented)、Multiple Service Packet、Forward Open / Close、Unconnected Send、Symbol 一覧、STRING テンプレート、Identity は revision 20.1 の "moz <name>"; タグ = `[[variable]]`) ← **完了**
+24. EtherNet/IP の Omron NJ 方言 (`[[server]] protocol = "enip-nj"`; W506 第 7 章の変数読み書き (要素数必須、BOOL = 状態 + 強制、BOOL 配列はワード詰め、CIP STRING、時刻型はナノ秒)、Simple Data Segment、Tag Name Server (6A / 5F) と Variable Object (6B) / Variable Type Object (6C) による一覧、NJ501-1300 の Identity、接続サイズ 1994 上限; Fragmented / Multiple Service Packet は無し) ← **完了**

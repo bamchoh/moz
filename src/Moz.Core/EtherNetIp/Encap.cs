@@ -114,8 +114,9 @@ public static class Encap
 
 /// <summary>
 /// EtherNet/IP explicit messaging server (the real units listen on 44818) —
-/// one <see cref="IProtocolRunner"/> per [[server]] with protocol "enip".
-/// The device's typed variables are the tags (<see cref="CipRouter"/>).
+/// one <see cref="IProtocolRunner"/> per [[server]] with protocol "enip"
+/// (Logix dialect, <see cref="CipRouter"/>) or "enip-nj" (Omron NJ dialect,
+/// <see cref="NjCipRouter"/>). The device's typed variables are the tags.
 /// Each TCP connection owns one session handle and its class 3 connections;
 /// a frame that is not an encapsulation header closes the connection
 /// without an answer.
@@ -123,25 +124,37 @@ public static class Encap
 public sealed class EnipServer : IProtocolRunner
 {
     /// <summary>CIP reply budget of an unconnected (SendRRData) message: the Logix unconnected limit.</summary>
-    public const int UnconnectedReplyMax = 504;
+    public const int LogixUnconnectedReplyMax = 504;
+
+    /// <summary>The NJ's UCMM limit (W506 7-1-2).</summary>
+    public const int NjUnconnectedReplyMax = 502;
 
     private static int s_session;
     private static int s_connection;
 
     private readonly IPEndPoint _bind;
     private readonly VariableTable _table;
+    private readonly CipDialect _dialect;
+    private readonly CipIdentity _identity;
     private readonly ILogger _logger;
     private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public EnipServer(string name, IPEndPoint bind, VariableTable table, ILogger logger)
+    public EnipServer(string name, IPEndPoint bind, VariableTable table, CipDialect dialect, ILogger logger)
     {
         Name = name;
         _bind = bind;
         _table = table;
+        _dialect = dialect;
+        _identity = dialect == CipDialect.Logix ? CipIdentity.Logix(name) : CipIdentity.OmronNj();
         _logger = logger;
     }
 
     public string Name { get; }
+
+    /// <summary>The config spelling: "enip" (Logix) or "enip-nj" (Omron NJ).</summary>
+    public string Protocol => _dialect == CipDialect.Logix ? "enip" : "enip-nj";
+
+    private int UnconnectedReplyMax => _dialect == CipDialect.Logix ? LogixUnconnectedReplyMax : NjUnconnectedReplyMax;
 
     /// <summary>The concrete endpoint after Start (set by <see cref="RunAsync"/>).</summary>
     public IPEndPoint? BoundEndpoint { get; private set; }
@@ -164,7 +177,7 @@ public sealed class EnipServer : IProtocolRunner
         }
         BoundEndpoint = (IPEndPoint)listener.LocalEndpoint;
         _ready.TrySetResult();
-        _logger.LogInformation("listening {Name} on {Endpoint} (enip, {Count} tags)", Name, BoundEndpoint, _table.Variables.Count);
+        _logger.LogInformation("listening {Name} on {Endpoint} ({Protocol}, {Count} tags)", Name, BoundEndpoint, Protocol, _table.Variables.Count);
 
         var pending = new List<Task>();
         try
@@ -396,7 +409,8 @@ public sealed class EnipServer : IProtocolRunner
     {
         try
         {
-            return CipRouter.Handle(request, new CipContext(_table, Name, connections, maxReply));
+            var ctx = new CipContext(_table, _identity, connections, maxReply);
+            return _dialect == CipDialect.Logix ? CipRouter.Handle(request, ctx) : NjCipRouter.Handle(request, ctx);
         }
         catch (Exception ex)
         {
@@ -409,7 +423,7 @@ public sealed class EnipServer : IProtocolRunner
     /// <summary>ListIdentity item: encapsulation version, socket address, the identity attributes, state.</summary>
     private byte[] ListIdentity()
     {
-        var identity = CipRouter.IdentityAttributes(new CipContext(_table, Name, new Connections(), UnconnectedReplyMax));
+        var identity = _identity.Attributes();
         var socket = new byte[16];
         BinaryPrimitives.WriteUInt16BigEndian(socket, 2);                               // AF_INET
         BinaryPrimitives.WriteUInt16BigEndian(socket.AsSpan(2), (ushort)(BoundEndpoint?.Port ?? 44818));

@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 using Moz.Devices;
+using static Moz.EtherNetIp.CipCommon;
 
 namespace Moz.EtherNetIp;
 
@@ -17,10 +18,36 @@ public interface ICipConnections
     bool CloseConnection(ushort serial, ushort vendor, uint originatorSerial);
 }
 
-/// <summary>What the router needs: the tags (variables), the identity name, the connection table and the reply budget.</summary>
-public sealed record CipContext(VariableTable Table, string Name, ICipConnections Connections, int MaxReply)
+/// <summary>Which controller family the tag server imitates: the CIP services, data formats and objects differ.</summary>
+public enum CipDialect
 {
-    public string ProductName => $"moz {Name}";
+    /// <summary>Rockwell ControlLogix / CompactLogix style (<see cref="CipRouter"/>): [[server]] protocol = "enip".</summary>
+    Logix,
+
+    /// <summary>Omron NJ / NX style (<see cref="NjCipRouter"/>): [[server]] protocol = "enip-nj".</summary>
+    OmronNj,
+}
+
+/// <summary>The Identity object attributes 1..7 (also sent in ListIdentity).</summary>
+public sealed record CipIdentity(ushort VendorId, ushort DeviceType, ushort ProductCode, byte RevisionMajor, byte RevisionMinor, uint SerialNumber, string ProductName)
+{
+    public const uint MozSerial = 0x004D4F5A; // "MOZ"
+
+    /// <summary>Logix style: vendor 0, programmable logic controller, revision 20.1 (below 21 clients address tags by name, not by instance id), "moz &lt;name&gt;".</summary>
+    public static CipIdentity Logix(string name) => new(0x0000, 0x000E, 0x0001, 20, 1, MozSerial, $"moz {name}");
+
+    /// <summary>An NJ501-1300: vendor 2F (Omron), communications adapter, product code 0665, CIP revision 2.6 (unit version 1.21+), per W506 7-5-2.</summary>
+    public static CipIdentity OmronNj() => new(0x002F, 0x000C, 0x0665, 2, 6, MozSerial, "NJ501-1300");
+
+    /// <summary>Vendor, device type, product code, revision, status, serial, product name (the attributes in order).</summary>
+    public byte[] Attributes() =>
+        [.. U16(VendorId), .. U16(DeviceType), .. U16(ProductCode), RevisionMajor, RevisionMinor, .. U16(0), .. U32(SerialNumber), .. ShortStr(ProductName)];
+}
+
+/// <summary>What a router needs: the tags (variables), the identity, the connection table and the reply budget.</summary>
+public sealed record CipContext(VariableTable Table, CipIdentity Identity, ICipConnections Connections, int MaxReply)
+{
+    public string ProductName => Identity.ProductName;
 }
 
 /// <summary>What the router did with one request: the reply plus the log fields (Error = general status hex, "FF:2105" with an extended status).</summary>
@@ -37,32 +64,12 @@ public readonly record struct CipOutcome(byte[] Reply, string Op, string Target,
 /// </summary>
 public static class CipRouter
 {
-    public const ushort VendorId = 0x0000;
-    public const ushort DeviceType = 0x000E;    // programmable logic controller
-    public const ushort ProductCode = 0x0001;
-    public const byte RevisionMajor = 20;       // < 21: clients address tags by name, not instance id
-    public const byte RevisionMinor = 1;
-    public const uint SerialNumber = 0x004D4F5A; // "MOZ"
     public const ushort StringHandle = 0x0FCE;  // the Logix STRING structure
     public const int StringData = 82;
     public const int StringSize = 4 + StringData + 2;
 
-    // general status codes
-    private const byte Ok = 0x00;
-    private const byte ConnectionFailure = 0x01;
-    private const byte PathSegmentError = 0x04;
-    private const byte PathDestinationUnknown = 0x05;
-    private const byte PartialTransfer = 0x06;
-    private const byte ServiceNotSupported = 0x08;
-    private const byte PrivilegeViolation = 0x0F;
-    private const byte NotEnoughData = 0x13;
-    private const byte AttributeNotSupported = 0x14;
-    private const byte TooMuchData = 0x15;
-    private const byte InvalidParameter = 0x20;
-    private const byte Extended = 0xFF;
     private const ushort BeyondEnd = 0x2105;
     private const ushort TypeMismatch = 0x2107;
-    private const ushort ConnectionNotFound = 0x0107;
 
     public static CipOutcome Handle(ReadOnlySpan<byte> request, CipContext ctx)
     {
@@ -107,6 +114,10 @@ public static class CipRouter
         if (service is not (0x4C or 0x4D or 0x52 or 0x53))
         {
             return Fail(service, ServiceNotSupported, op, name);
+        }
+        if (path.DataSize is not null)
+        {
+            return Fail(service, PathSegmentError, op, name); // the Simple Data Segment is an Omron thing
         }
         if (!TagInfo.TryFind(ctx.Table, name, out var tag))
         {
@@ -222,38 +233,6 @@ public static class CipRouter
 
     // --- objects ----------------------------------------------------------------------------------------
 
-    private static CipOutcome Identity(byte service, CipPath path, CipContext ctx)
-    {
-        const string op = "identity";
-        var target = $"{service:X2}";
-        if (service == 0x01)
-        {
-            return new CipOutcome(Reply(service, Ok, IdentityAttributes(ctx)), op, target, 0, null);
-        }
-        if (service == 0x0E)
-        {
-            byte[]? value = path.Attribute switch
-            {
-                1 => U16(VendorId),
-                2 => U16(DeviceType),
-                3 => U16(ProductCode),
-                4 => [RevisionMajor, RevisionMinor],
-                5 => U16(0),
-                6 => U32(SerialNumber),
-                7 => ShortStr(ctx.ProductName),
-                _ => null,
-            };
-            return value is null
-                ? Fail(service, AttributeNotSupported, op, $"attr={path.Attribute}")
-                : new CipOutcome(Reply(service, Ok, value), op, $"attr={path.Attribute}", 0, null);
-        }
-        return Fail(service, ServiceNotSupported, $"cmd={service:X2}", op);
-    }
-
-    /// <summary>Vendor, device type, product code, revision, status, serial, product name (the Identity attributes in order).</summary>
-    public static byte[] IdentityAttributes(CipContext ctx) =>
-        [.. U16(VendorId), .. U16(DeviceType), .. U16(ProductCode), RevisionMajor, RevisionMinor, .. U16(0), .. U32(SerialNumber), .. ShortStr(ctx.ProductName)];
-
     private static CipOutcome MultipleServicePacket(ReadOnlySpan<byte> data, CipContext ctx)
     {
         const string op = "multi";
@@ -302,21 +281,11 @@ public static class CipRouter
         switch (service)
         {
             case 0x52:
-                // unconnected send: tick, timeout, embedded size, embedded request, pad, route path size, reserved, route path
-                if (data.Length < 4)
-                {
-                    return Fail(service, NotEnoughData, "unconnected-send", "?");
-                }
-                int size = BinaryPrimitives.ReadUInt16LittleEndian(data[2..]);
-                if (4 + size > data.Length)
-                {
-                    return Fail(service, NotEnoughData, "unconnected-send", "?");
-                }
-                return Handle(data.Slice(4, size), ctx);
+                return TryEmbedded(data, out var embedded) ? Handle(embedded, ctx) : Fail(service, NotEnoughData, "unconnected-send", "?");
 
             case 0x54:
             case 0x5B:
-                return ForwardOpen(service, data, ctx);
+                return ForwardOpen(service, data, ctx, int.MaxValue);
 
             case 0x4E:
                 return ForwardClose(data, ctx);
@@ -324,52 +293,6 @@ public static class CipRouter
             default:
                 return Fail(service, ServiceNotSupported, $"cmd={service:X2}", "connection-manager");
         }
-    }
-
-    private static CipOutcome ForwardOpen(byte service, ReadOnlySpan<byte> data, CipContext ctx)
-    {
-        const string op = "forward-open";
-        bool large = service == 0x5B;
-        int paramSize = large ? 4 : 2;
-        int fixedLength = 2 + 4 + 4 + 2 + 2 + 4 + 1 + 3 + 4 + paramSize + 4 + paramSize + 1 + 1;
-        if (data.Length < fixedLength)
-        {
-            return Fail(service, NotEnoughData, op, "?");
-        }
-        uint toOriginator = BinaryPrimitives.ReadUInt32LittleEndian(data[6..]);
-        ushort serial = BinaryPrimitives.ReadUInt16LittleEndian(data[10..]);
-        ushort vendor = BinaryPrimitives.ReadUInt16LittleEndian(data[12..]);
-        uint originatorSerial = BinaryPrimitives.ReadUInt32LittleEndian(data[14..]);
-        var toTargetRpi = data.Slice(22, 4);
-        uint toTargetParams = large ? BinaryPrimitives.ReadUInt32LittleEndian(data[26..]) : BinaryPrimitives.ReadUInt16LittleEndian(data[26..]);
-        var toOriginatorRpi = data.Slice(26 + paramSize, 4);
-        int connectionSize = large ? (int)(toTargetParams & 0xFFFF) : (int)(toTargetParams & 0x1FF);
-        uint toTarget = ctx.Connections.OpenConnection(toOriginator, serial, vendor, originatorSerial, connectionSize);
-        var reply = new byte[26];
-        BinaryPrimitives.WriteUInt32LittleEndian(reply, toTarget);
-        BinaryPrimitives.WriteUInt32LittleEndian(reply.AsSpan(4), toOriginator);
-        data.Slice(10, 8).CopyTo(reply.AsSpan(8));        // serial, vendor, originator serial
-        toTargetRpi.CopyTo(reply.AsSpan(16));               // O→T API
-        toOriginatorRpi.CopyTo(reply.AsSpan(20));           // T→O API
-        return new CipOutcome(Reply(service, Ok, reply), op, $"size={connectionSize}", 1, null);
-    }
-
-    private static CipOutcome ForwardClose(ReadOnlySpan<byte> data, CipContext ctx)
-    {
-        const string op = "forward-close";
-        if (data.Length < 10)
-        {
-            return Fail(0x4E, NotEnoughData, op, "?");
-        }
-        ushort serial = BinaryPrimitives.ReadUInt16LittleEndian(data[2..]);
-        ushort vendor = BinaryPrimitives.ReadUInt16LittleEndian(data[4..]);
-        uint originatorSerial = BinaryPrimitives.ReadUInt32LittleEndian(data[6..]);
-        var target = $"serial={serial}";
-        if (!ctx.Connections.CloseConnection(serial, vendor, originatorSerial))
-        {
-            return Fail(0x4E, ConnectionFailure, op, target, 0, ConnectionNotFound);
-        }
-        return new CipOutcome(Reply(0x4E, Ok, [.. data.Slice(2, 8), 0, 0]), op, target, 0, null);
     }
 
     private static CipOutcome SymbolList(CipPath path, ReadOnlySpan<byte> data, CipContext ctx)
@@ -500,32 +423,170 @@ public static class CipRouter
         }
     }
 
-    // --- replies ----------------------------------------------------------------------------------------
-
-    private static CipOutcome Fail(byte service, byte status, string op, string target, int points = 0, ushort? extended = null)
-    {
-        var reply = extended is { } ext
-            ? new byte[] { (byte)(service | 0x80), 0, status, 1, (byte)ext, (byte)(ext >> 8) }
-            : [(byte)(service | 0x80), 0, status, 0];
-        return new CipOutcome(reply, op, target, points, extended is { } e ? $"{status:X2}:{e:X4}" : $"{status:X2}");
-    }
-
-    private static byte[] Reply(byte service, byte status, ReadOnlySpan<byte> data) =>
-        [(byte)(service | 0x80), 0, status, 0, .. data];
-
-    private static byte[] U16(ushort v) => [(byte)v, (byte)(v >> 8)];
-    private static byte[] U32(uint v) => [(byte)v, (byte)(v >> 8), (byte)(v >> 16), (byte)(v >> 24)];
-    private static byte[] ShortStr(string s) => [(byte)s.Length, .. Encoding.ASCII.GetBytes(s)];
-    private static byte[] Str16(string s) => [.. U16((ushort)s.Length), .. Encoding.ASCII.GetBytes(s)];
 }
 
-/// <summary>A parsed request path: a symbolic tag (possibly with an element index) or a logical class / instance / attribute.</summary>
-internal readonly record struct CipPath(string? Symbol, int? Element, int Class, int Instance, int Attribute, bool Valid)
+/// <summary>
+/// What both dialects share: the general status codes, the reply / fail
+/// encoders, the Identity object, Forward Open / Close and the unconnected
+/// send unwrapping.
+/// </summary>
+internal static class CipCommon
+{
+    // general status codes
+    internal const byte Ok = 0x00;
+    internal const byte ConnectionFailure = 0x01;
+    internal const byte PathSegmentError = 0x04;
+    internal const byte PathDestinationUnknown = 0x05;
+    internal const byte PartialTransfer = 0x06;
+    internal const byte ServiceNotSupported = 0x08;
+    internal const byte PrivilegeViolation = 0x0F;
+    internal const byte NotEnoughData = 0x13;
+    internal const byte AttributeNotSupported = 0x14;
+    internal const byte TooMuchData = 0x15;
+    internal const byte InvalidParameter = 0x20;
+    internal const byte Extended = 0xFF;
+    internal const ushort ConnectionNotFound = 0x0107;
+    internal const ushort InvalidConnectionSize = 0x0109;
+
+    /// <summary>Identity object: Get Attributes All (instance 0 = the class attributes revision 1 / max instance 1) and Get Attribute Single 1..7.</summary>
+    internal static CipOutcome Identity(byte service, CipPath path, CipContext ctx)
+    {
+        const string op = "identity";
+        var target = $"{service:X2}";
+        if (service == 0x01)
+        {
+            byte[] data = path.Instance == 0 ? [.. U16(1), .. U16(1)] : ctx.Identity.Attributes();
+            return new CipOutcome(Reply(service, Ok, data), op, target, 0, null);
+        }
+        if (service == 0x0E)
+        {
+            var id = ctx.Identity;
+            byte[]? value = path.Attribute switch
+            {
+                1 => U16(id.VendorId),
+                2 => U16(id.DeviceType),
+                3 => U16(id.ProductCode),
+                4 => [id.RevisionMajor, id.RevisionMinor],
+                5 => U16(0),
+                6 => U32(id.SerialNumber),
+                7 => ShortStr(id.ProductName),
+                _ => null,
+            };
+            return value is null
+                ? Fail(service, AttributeNotSupported, op, $"attr={path.Attribute}")
+                : new CipOutcome(Reply(service, Ok, value), op, $"attr={path.Attribute}", 0, null);
+        }
+        return Fail(service, ServiceNotSupported, $"cmd={service:X2}", op);
+    }
+
+    /// <summary>Unconnected send: tick, timeout, embedded size, embedded request (then pad, route path size, reserved, route path, which are not checked).</summary>
+    internal static bool TryEmbedded(ReadOnlySpan<byte> data, out ReadOnlySpan<byte> embedded)
+    {
+        embedded = default;
+        if (data.Length < 4)
+        {
+            return false;
+        }
+        int size = BinaryPrimitives.ReadUInt16LittleEndian(data[2..]);
+        if (4 + size > data.Length)
+        {
+            return false;
+        }
+        embedded = data.Slice(4, size);
+        return true;
+    }
+
+    /// <summary>Forward Open (54) / Large Forward Open (5B): register the connection; a connection size above <paramref name="maxSize"/> is refused with 01 + 0109.</summary>
+    internal static CipOutcome ForwardOpen(byte service, ReadOnlySpan<byte> data, CipContext ctx, int maxSize)
+    {
+        const string op = "forward-open";
+        bool large = service == 0x5B;
+        int paramSize = large ? 4 : 2;
+        int fixedLength = 2 + 4 + 4 + 2 + 2 + 4 + 1 + 3 + 4 + paramSize + 4 + paramSize + 1 + 1;
+        if (data.Length < fixedLength)
+        {
+            return Fail(service, NotEnoughData, op, "?");
+        }
+        uint toOriginator = BinaryPrimitives.ReadUInt32LittleEndian(data[6..]);
+        ushort serial = BinaryPrimitives.ReadUInt16LittleEndian(data[10..]);
+        ushort vendor = BinaryPrimitives.ReadUInt16LittleEndian(data[12..]);
+        uint originatorSerial = BinaryPrimitives.ReadUInt32LittleEndian(data[14..]);
+        var toTargetRpi = data.Slice(22, 4);
+        uint toTargetParams = large ? BinaryPrimitives.ReadUInt32LittleEndian(data[26..]) : BinaryPrimitives.ReadUInt16LittleEndian(data[26..]);
+        var toOriginatorRpi = data.Slice(26 + paramSize, 4);
+        int connectionSize = large ? (int)(toTargetParams & 0xFFFF) : (int)(toTargetParams & 0x1FF);
+        var target = $"size={connectionSize}";
+        if (connectionSize > maxSize)
+        {
+            return Fail(service, ConnectionFailure, op, target, 0, InvalidConnectionSize);
+        }
+        uint toTarget = ctx.Connections.OpenConnection(toOriginator, serial, vendor, originatorSerial, connectionSize);
+        var reply = new byte[26];
+        BinaryPrimitives.WriteUInt32LittleEndian(reply, toTarget);
+        BinaryPrimitives.WriteUInt32LittleEndian(reply.AsSpan(4), toOriginator);
+        data.Slice(10, 8).CopyTo(reply.AsSpan(8));        // serial, vendor, originator serial
+        toTargetRpi.CopyTo(reply.AsSpan(16));               // O→T API
+        toOriginatorRpi.CopyTo(reply.AsSpan(20));           // T→O API
+        return new CipOutcome(Reply(service, Ok, reply), op, target, 1, null);
+    }
+
+    /// <summary>Forward Close (4E): remove the connection named by serial / vendor / originator serial; unknown → 01 + 0107.</summary>
+    internal static CipOutcome ForwardClose(ReadOnlySpan<byte> data, CipContext ctx)
+    {
+        const string op = "forward-close";
+        if (data.Length < 10)
+        {
+            return Fail(0x4E, NotEnoughData, op, "?");
+        }
+        ushort serial = BinaryPrimitives.ReadUInt16LittleEndian(data[2..]);
+        ushort vendor = BinaryPrimitives.ReadUInt16LittleEndian(data[4..]);
+        uint originatorSerial = BinaryPrimitives.ReadUInt32LittleEndian(data[6..]);
+        var target = $"serial={serial}";
+        if (!ctx.Connections.CloseConnection(serial, vendor, originatorSerial))
+        {
+            return Fail(0x4E, ConnectionFailure, op, target, 0, ConnectionNotFound);
+        }
+        return new CipOutcome(Reply(0x4E, Ok, [.. data.Slice(2, 8), 0, 0]), op, target, 0, null);
+    }
+
+    // --- replies ----------------------------------------------------------------------------------------
+
+    internal static CipOutcome Fail(byte service, byte status, string op, string target, int points = 0, ushort? extended = null) =>
+        Fail(service, status, op, target, points, extended is { } e ? [e] : []);
+
+    /// <summary>An error reply with any number of extended status words (log error "1F:0104,1103").</summary>
+    internal static CipOutcome Fail(byte service, byte status, string op, string target, int points, ushort[] extended)
+    {
+        var reply = new List<byte> { (byte)(service | 0x80), 0, status, (byte)extended.Length };
+        foreach (var e in extended)
+        {
+            reply.AddRange(U16(e));
+        }
+        var error = extended.Length == 0 ? $"{status:X2}" : $"{status:X2}:{string.Join(",", extended.Select(e => e.ToString("X4")))}";
+        return new CipOutcome(reply.ToArray(), op, target, points, error);
+    }
+
+    internal static byte[] Reply(byte service, byte status, ReadOnlySpan<byte> data) =>
+        [(byte)(service | 0x80), 0, status, 0, .. data];
+
+    internal static byte[] U16(ushort v) => [(byte)v, (byte)(v >> 8)];
+    internal static byte[] U32(uint v) => [(byte)v, (byte)(v >> 8), (byte)(v >> 16), (byte)(v >> 24)];
+    internal static byte[] ShortStr(string s) => [(byte)s.Length, .. Encoding.ASCII.GetBytes(s)];
+    internal static byte[] Str16(string s) => [.. U16((ushort)s.Length), .. Encoding.ASCII.GetBytes(s)];
+}
+
+/// <summary>
+/// A parsed request path: a symbolic tag (possibly with an element index and,
+/// on the NJ, a Simple Data Segment byte offset / size) or a logical class /
+/// instance / attribute.
+/// </summary>
+internal readonly record struct CipPath(string? Symbol, int? Element, int Class, int Instance, int Attribute, bool Valid, int? DataOffset = null, int? DataSize = null)
 {
     public static CipPath Parse(ReadOnlySpan<byte> path)
     {
         string? symbol = null;
         int? element = null;
+        int? dataOffset = null, dataSize = null;
         int cls = -1, instance = -1, attribute = -1;
         int at = 0;
         while (at < path.Length)
@@ -556,6 +617,13 @@ internal readonly record struct CipPath(string? Symbol, int? Element, int Class,
                     element = (int)BinaryPrimitives.ReadUInt32LittleEndian(path[(at + 2)..]);
                     at += 6;
                     break;
+                case 0x80:
+                    // simple data segment (W506 7-4-4): 80, length 3 (words), byte offset (UDINT), size (UINT)
+                    if (at + 8 > path.Length || path[at + 1] != 3) return Invalid;
+                    dataOffset = (int)Math.Min(BinaryPrimitives.ReadUInt32LittleEndian(path[(at + 2)..]), int.MaxValue);
+                    dataSize = BinaryPrimitives.ReadUInt16LittleEndian(path[(at + 6)..]);
+                    at += 8;
+                    break;
                 case 0x20 or 0x24 or 0x30:
                     if (at + 2 > path.Length) return Invalid;
                     Set(seg, path[at + 1], ref cls, ref instance, ref attribute);
@@ -570,7 +638,7 @@ internal readonly record struct CipPath(string? Symbol, int? Element, int Class,
                     return Invalid;
             }
         }
-        return new CipPath(symbol, element, cls, instance, attribute, symbol is not null || cls >= 0);
+        return new CipPath(symbol, element, cls, instance, attribute, symbol is not null || cls >= 0, dataOffset, dataSize);
     }
 
     private static void Set(byte seg, int value, ref int cls, ref int instance, ref int attribute)

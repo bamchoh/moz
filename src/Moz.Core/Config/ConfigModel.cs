@@ -431,7 +431,7 @@ public sealed class ServerConfig
     [TomlPropertyName("name")]
     public string Name { get; set; } = "";
 
-    /// <summary>"modbus-tcp" | "modbus-rtu" | "opcua" | "mc-3e" | "fins-tcp" | "fins-udp" | "kv-hostlink" | "s7" | "enip" (validated by ConfigLoader).</summary>
+    /// <summary>"modbus-tcp" | "modbus-rtu" | "opcua" | "mc-3e" | "fins-tcp" | "fins-udp" | "kv-hostlink" | "s7" | "enip" | "enip-nj" (validated by ConfigLoader).</summary>
     [TomlPropertyName("protocol")]
     public string Protocol { get; set; } = "";
 

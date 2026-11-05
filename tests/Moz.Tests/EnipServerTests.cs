@@ -48,7 +48,7 @@ public class EnipServerTests
     }
 
     private static CipOutcome Route(VariableTable vars, string requestHex, ICipConnections? connections = null, int maxReply = 504) =>
-        CipRouter.Handle(Convert.FromHexString(requestHex), new CipContext(vars, "plc-ua", connections ?? new FakeConnections(), maxReply));
+        CipRouter.Handle(Convert.FromHexString(requestHex), new CipContext(vars, CipIdentity.Logix("plc-ua"), connections ?? new FakeConnections(), maxReply));
 
     /// <summary>Symbolic path "name" (+ optional element index) as a padded EPATH with its word count.</summary>
     private static string TagPath(string name, int? element = null)
@@ -210,7 +210,7 @@ public class EnipServerTests
         var reply = o.Reply;
         Assert.Equal("81000000", Convert.ToHexString(reply[..4]));
         var body = reply[4..];
-        Assert.Equal(CipRouter.VendorId, BinaryPrimitives.ReadUInt16LittleEndian(body));
+        Assert.Equal(0x0000, BinaryPrimitives.ReadUInt16LittleEndian(body));
         Assert.Equal(0x000E, BinaryPrimitives.ReadUInt16LittleEndian(body[2..]));            // programmable logic controller
         Assert.Equal((20, 1), (body[6], body[7]));                                           // revision 20.1
         var name = Encoding.ASCII.GetString(body[15..(15 + body[14])]);
@@ -423,7 +423,7 @@ public class EnipServerTests
         var (_, vars) = Fixture();
         vars.Write("counter", 42);
         var provider = new CapturingProvider();
-        var server = new EnipServer("enip-srv", new IPEndPoint(IPAddress.Loopback, 0), vars, provider.CreateLogger("srv"));
+        var server = new EnipServer("enip-srv", new IPEndPoint(IPAddress.Loopback, 0), vars, CipDialect.Logix, provider.CreateLogger("srv"));
         using var cts = new CancellationTokenSource();
         _ = server.RunAsync(cts.Token);
         await server.Ready.WaitAsync(TimeSpan.FromSeconds(5));
@@ -491,7 +491,7 @@ public class EnipServerTests
     {
         var (_, vars) = Fixture();
         var provider = new CapturingProvider();
-        var server = new EnipServer("enip-srv", new IPEndPoint(IPAddress.Loopback, 0), vars, provider.CreateLogger("srv"));
+        var server = new EnipServer("enip-srv", new IPEndPoint(IPAddress.Loopback, 0), vars, CipDialect.Logix, provider.CreateLogger("srv"));
         using var cts = new CancellationTokenSource();
         _ = server.RunAsync(cts.Token);
         await server.Ready.WaitAsync(TimeSpan.FromSeconds(5));
