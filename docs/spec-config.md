@@ -121,7 +121,7 @@ value  = [{ speed = 10, on = true, label = "m0" }, { samples = [1.0, 2.0, 3.0, 4
 ```toml
 [[server]]
 name      = "sim-a"   # 必須、一意
-protocol  = "modbus-tcp"  # "modbus-tcp" | "modbus-rtu" | "opcua" | "mc-3e" | "fins-tcp" | "fins-udp" (opcua / mc-3e / fins は後節)
+protocol  = "modbus-tcp"  # "modbus-tcp" | "modbus-rtu" | "opcua" | "mc-3e" | "fins-tcp" | "fins-udp" | "kv-hostlink" (opcua / mc-3e / fins / kv は後節)
 device    = "plc-a"   # 参照する device 名 (未宣言名はエラー)
 bind      = "127.0.0.1"  # TCP。省略: 127.0.0.1
 port      = 50200     # TCP。省略: 50200。0 は ephemeral (テスト/CI 用)
@@ -188,6 +188,27 @@ count  = 100             # CIO 0..99 (省略: offset からテーブルの残り
 - 既定の割り当ては `DM → words 0..` (テーブル全長) だけ。他のエリアは `[[server.map]]` が無ければ終了コード 1101。ビットアクセス (`CIO 100.05`) は写し先ワードの中のビット
 - 検証: エリアが既知、`kind` が words / read_only_words、範囲と重複は mc-3e と同じ。`node` は fins 以外の protocol では設定禁止、fins-udp では無視
 - `unit_ids` は無視される。コマンド・終了コード・FINS/TCP の枠は docs/spec-fins.md
+
+### KV ホストリンク (kv-hostlink) サーバ (フェーズ 21)
+
+```toml
+[[server]]
+name     = "kv-a"
+protocol = "kv-hostlink"  # キーエンス KV 上位リンク、ASCII 行プロトコル、TCP (docs/spec-kv.md)
+device   = "plc-a"
+bind     = "127.0.0.1"    # 省略: 127.0.0.1
+port     = 8501           # 省略: 50200 (実機は 8501 なので明示する)
+
+[[server.map]]            # KV デバイス → メモリの割り当て (省略可)
+device = "MR"             # DM | EM | FM | W | ZF (ワード) | R | MR | LR | B (ビット)
+kind   = "bits"           # ワードデバイスは words | read_only_words、リレーは bits | read_only_bits
+offset = 1000             # MR0 (ch 0 bit 00) ↔ bits[1000]; リレーは channel × 16 + bit
+count  = 1600             # 100 チャネル分 (省略: offset からテーブルの残り全部)
+```
+
+- 既定の割り当ては `DM → words 0..` と `R → bits 0..` (各テーブル全長)。他のデバイスは `[[server.map]]` が無ければ `E0`。同じコードを書けば既定を置き換える
+- 検証: デバイスが既知、`kind` の種別がデバイスに一致、範囲と重複は mc-3e と同じ。`node` は設定禁止 (fins 専用)
+- `unit_ids` は無視される。コマンド・書式・エラー応答は docs/spec-kv.md
 
 ## [[client]] — クライアント (マスタ): リモートスレーブのミラー
 
@@ -394,8 +415,8 @@ interval_ms = 500       # 100..3600000 (省略: 1000)
 | log.level | trace/debug/info/warn/error |
 | log.format | text/json |
 | server.parity | none/even/odd |
-| server.protocol | modbus-tcp / modbus-rtu / opcua / mc-3e / fins-tcp / fins-udp (他はエラー) |
-| server.map[].device | 既知の MC デバイスコード (英字のみ) / FINS エリア (DM, CIO, W, H, A, E0..E18)、同一 server 内で一意; mc-3e / fins 以外では map 自体が禁止 |
+| server.protocol | modbus-tcp / modbus-rtu / opcua / mc-3e / fins-tcp / fins-udp / kv-hostlink (他はエラー) |
+| server.map[].device | 既知の MC デバイスコード (英字のみ) / FINS エリア (DM, CIO, W, H, A, E0..E18) / KV デバイス (DM, EM, FM, W, ZF, R, MR, LR, B)、同一 server 内で一意; mc-3e / fins / kv-hostlink 以外では map 自体が禁止 |
 | server.node | 1 .. 254 (fins-tcp / fins-udp のみ; 省略: bind の末尾オクテット) |
 | server.map[].kind | bits / read_only_bits / words / read_only_words (デバイスの種別と一致) |
 | server.map[].offset + count | device の該当テーブル長以内 (count 省略時は残り全部、1 セル以上) |

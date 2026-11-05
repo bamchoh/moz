@@ -60,6 +60,7 @@ moz moz.toml
 - [x] クライアントの汎用化 (`IRemoteDevice`) と MC プロトコル (3E バイナリ TCP) マスタ (`protocol = "mc-3e"`、`remote = "D100"`)
 - [x] MC プロトコル サーバ (`[[server]] protocol = "mc-3e"`、`[[server.map]]` で D/M/X 等をメモリに割り当て)
 - [x] メモリモデルの中立な命名: 設定は `bits` / `read_only_bits` / `words` / `read_only_words` (Modbus 由来の coils / discrete / holding / input は廃止、互換なし)
+- [x] キーエンス KV ホストリンク サーバ (`[[server]] protocol = "kv-hostlink"`、RD / RDS / WR / WRS / ST / RS と `.U .S .D .L .H` 書式、`[[server.map]]` で DM/EM/R/MR 等を割り当て)
 - [x] オムロン FINS サーバ (`[[server]] protocol = "fins-tcp" | "fins-udp"`、メモリエリア読出し / 書込み / 複数読出し、`[[server.map]]` で DM/CIO/W/H/A/EM をワードテーブルに割り当て)
 - [x] OPC UA クライアント (`[[client]] protocol = "opcua"`、ノード ↔ 型付き変数、周期 Read + Write; サブスクリプションは今後)
 - [x] 起動順 (サーバの準備完了後にクライアント/スクリプト) と OPC UA サーバのユーザー管理 (`[[server.user]]`、匿名の write/read/deny)

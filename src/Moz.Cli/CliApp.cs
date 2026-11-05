@@ -7,6 +7,7 @@ using Moz.Config;
 using Moz.Devices;
 using Moz.Logging;
 using Moz.Fins;
+using Moz.Kv;
 using Moz.Mc;
 using Moz.Modbus.Client;
 using Moz.OpcUa;
@@ -225,6 +226,12 @@ public static class CliApp
                     device,
                     FinsMap.Merge(device, s.Map.Select(m => FinsMapOf(m, device))),
                     loggerFactory.CreateLogger($"moz.server.{s.Name}")),
+                "kv-hostlink" => new KvServer(
+                    s.Name,
+                    new IPEndPoint(IPAddress.Parse(s.Bind!), s.Port),
+                    device,
+                    KvMap.Merge(device, s.Map.Select(m => KvMapOf(m, device))),
+                    loggerFactory.CreateLogger($"moz.server.{s.Name}")),
                 "modbus-rtu" => new RtuServer(
                     s.Name,
                     OpenSerialPort(s.SerialPort!, s.Baud, s.Parity, s.DataBits, s.StopBits),
@@ -310,6 +317,16 @@ public static class CliApp
         }
         var table = LocalKinds.ToTable(m.Kind);
         return new McMap(dev, table, m.Offset, m.Count ?? device.Length(table) - m.Offset);
+    }
+
+    private static KvMap KvMapOf(ServerMapConfig m, IDeviceAccess device)
+    {
+        if (!KvDevice.TryFromCode(m.Device, out var dev))
+        {
+            throw new InvalidOperationException($"invalid KV device \"{m.Device}\" (already rejected by config validation)");
+        }
+        var table = LocalKinds.ToTable(m.Kind);
+        return new KvMap(dev, table, m.Offset, m.Count ?? device.Length(table) - m.Offset);
     }
 
     private static FinsMap FinsMapOf(ServerMapConfig m, IDeviceAccess device)

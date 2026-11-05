@@ -23,4 +23,8 @@ public static class TableKindExtensions
 
     public static bool IsWord(this TableKind table) =>
         table is TableKind.Words or TableKind.ReadOnlyWords;
+
+    /// <summary>Tables that protocol servers may not write (only the process itself: scripts, variables, client mirrors).</summary>
+    public static bool IsReadOnly(this TableKind table) =>
+        table is TableKind.ReadOnlyBits or TableKind.ReadOnlyWords;
 }

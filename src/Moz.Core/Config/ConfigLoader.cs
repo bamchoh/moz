@@ -138,7 +138,7 @@ public static partial class ConfigLoader
 
     private static readonly string[] LogLevels = ["trace", "debug", "info", "warn", "error"];
     private static readonly string[] LogFormats = ["text", "json"];
-    private static readonly string[] Protocols = ["modbus-tcp", "modbus-rtu", "opcua", "mc-3e", "fins-tcp", "fins-udp"];
+    private static readonly string[] Protocols = ["modbus-tcp", "modbus-rtu", "opcua", "mc-3e", "fins-tcp", "fins-udp", "kv-hostlink"];
     private static readonly string[] ClientProtocols = ["modbus-tcp", "modbus-rtu", "mc-3e", "opcua"];
 
     private static void Validate(MozConfig config, string path, List<ConfigError> errors)
@@ -280,10 +280,14 @@ public static partial class ConfigLoader
             {
                 ValidateMaps(server, mappedDevice, path, errors, ResolveFinsArea, "DM|CIO|W|H|A|E0..E18");
             }
+            else if (server.Protocol == "kv-hostlink")
+            {
+                ValidateMaps(server, mappedDevice, path, errors, ResolveKvDevice, "DM|EM|FM|W|ZF|R|MR|LR|B");
+            }
             else if (server.Map.Count > 0)
             {
                 errors.Add(new ConfigError(path,
-                    $"server.map is only valid for mc-3e and fins servers, set on \"{server.Name}\" ({server.Protocol})"));
+                    $"server.map is only valid for mc-3e, fins and kv-hostlink servers, set on \"{server.Name}\" ({server.Protocol})"));
             }
             if (server.Node is { } node)
             {
@@ -802,6 +806,9 @@ public static partial class ConfigLoader
 
     private static (string Code, bool IsBit)? ResolveFinsArea(string text) =>
         Fins.FinsArea.TryFromCode(text, out var area) ? (area.Code, false) : null;
+
+    private static (string Code, bool IsBit)? ResolveKvDevice(string text) =>
+        Kv.KvDevice.TryFromCode(text, out var dev) ? (dev.Code, dev.IsBit) : null;
 
     /// <summary>[[server.map]] lines (mc-3e and fins): known code, unique, kind bitness matches, range within the device table.</summary>
     private static void ValidateMaps(ServerConfig server, DeviceConfig? device, string path, List<ConfigError> errors,

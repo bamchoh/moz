@@ -179,6 +179,29 @@ public class CliTests : IDisposable
     }
 
     [Fact]
+    public async Task Validate_KvServer_Exits0()
+    {
+        const string toml =
+            """
+            [[device]]
+            name = "plc1"
+
+            [[server]]
+            name = "kv-a"
+            protocol = "kv-hostlink"
+            device = "plc1"
+            port = 8501
+
+            [[server.map]]
+            device = "MR"
+            kind = "bits"
+            offset = 10000
+            """;
+        var exit = await Moz.Cli.CliApp.Run(["validate", WriteFile("kv-server.toml", toml)]);
+        Assert.Equal(0, exit);
+    }
+
+    [Fact]
     public async Task Validate_McClient_Exits0()
     {
         const string toml =

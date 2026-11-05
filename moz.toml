@@ -220,6 +220,21 @@ kind = "words"
 offset = 600
 count = 100
 
+# Keyence KV host link server (phase 21): plc-a as a KV CPU unit, ASCII lines
+# on 8501 ("RD DM100", "WRS DM0 2 1 2", "ST R100"). Default map: DM -> words,
+# R -> bits; MR below goes to the read-only bit table.
+[[server]]
+name = "kv-a"
+protocol = "kv-hostlink"
+device = "plc-a"
+bind = "127.0.0.1"
+port = 8501
+
+[[server.map]]
+device = "MR"
+kind = "read_only_bits"
+offset = 0
+
 # OPC UA example (phase 7): publish the plc-a variables as nodes.
 # Nodes live under Objects/plc-ua (ns=urn:moz:ua:ns).
 [[server]]
