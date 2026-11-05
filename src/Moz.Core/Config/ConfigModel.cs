@@ -431,7 +431,7 @@ public sealed class ServerConfig
     [TomlPropertyName("name")]
     public string Name { get; set; } = "";
 
-    /// <summary>"modbus-tcp" | "modbus-rtu" | "opcua" | "mc-3e" | "fins-tcp" | "fins-udp" | "kv-hostlink" (validated by ConfigLoader).</summary>
+    /// <summary>"modbus-tcp" | "modbus-rtu" | "opcua" | "mc-3e" | "fins-tcp" | "fins-udp" | "kv-hostlink" | "s7" (validated by ConfigLoader).</summary>
     [TomlPropertyName("protocol")]
     public string Protocol { get; set; } = "";
 
@@ -485,7 +485,7 @@ public sealed class ServerConfig
     [TomlPropertyName("endpoint")]
     public string? Endpoint { get; set; }
 
-    /// <summary>mc-3e / fins / kv-hostlink: where protocol devices (areas) live in the memory model (mc-3e defaults: D→words, M→bits, X→read_only_bits; fins: DM→words; kv: DM→words, R→bits).</summary>
+    /// <summary>mc-3e / fins / kv-hostlink / s7: where protocol devices (areas) live in the memory model (mc-3e defaults: D→words, M→bits, X→read_only_bits; fins: DM→words; kv: DM→words, R→bits; s7: DB1→words).</summary>
     [TomlPropertyName("map")]
     public List<ServerMapConfig> Map { get; set; } = [];
 
@@ -535,10 +535,10 @@ public sealed class OpcUaUserConfig
     public IDictionary<string, object?>? Extra { get; set; }
 }
 
-/// <summary>One [[server.map]] line: MC device / FINS area / KV device n ↔ table[offset + n], n in 0..count-1 (KV relays: channel*16 + bit).</summary>
+/// <summary>One [[server.map]] line: MC device / FINS area / KV device / S7 area n ↔ table[offset + n], n in 0..count-1 (KV relays: channel*16 + bit; S7: byte b ↔ word b/2).</summary>
 public sealed class ServerMapConfig
 {
-    /// <summary>MC device code letters only ("D", "W", "ZR"), a FINS area ("DM", "CIO", "E0") or a KV device ("DM", "R", "MR").</summary>
+    /// <summary>MC device code letters only ("D", "W", "ZR"), a FINS area ("DM", "CIO", "E0"), a KV device ("DM", "R", "MR") or an S7 area ("DB10", "M", "I", "Q").</summary>
     [TomlPropertyName("device")]
     public string Device { get; set; } = "";
 

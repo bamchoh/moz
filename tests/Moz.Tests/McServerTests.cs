@@ -174,11 +174,11 @@ public class McServerTests
         Assert.True(plc.ReadBit(TableKind.Bits, 10));
         Assert.False(plc.ReadBit(TableKind.Bits, 11));
         Assert.True(plc.ReadBit(TableKind.Bits, 12));
-        Assert.Contains(provider.Entries, e => e.EventId == Moz.Logging.CommLog.EventIds.Request.Id
+        await ExpectLogAsync(provider, e => e.EventId == Moz.Logging.CommLog.EventIds.Request.Id
             && e.Message.Contains("op=read") && e.Message.Contains("target=D0") && e.Message.Contains("qty=2") && e.Message.Contains("result=ok"));
-        Assert.Contains(provider.Entries, e => e.EventId == Moz.Logging.CommLog.EventIds.Request.Id
+        await ExpectLogAsync(provider, e => e.EventId == Moz.Logging.CommLog.EventIds.Request.Id
             && e.Message.Contains("op=write") && e.Message.Contains("target=M10"));
-        Assert.Contains(provider.Entries, e => e.EventId == Moz.Logging.CommLog.EventIds.ConnAccepted.Id);
+        await ExpectLogAsync(provider, e => e.EventId == Moz.Logging.CommLog.EventIds.ConnAccepted.Id);
 
         await cts.CancelAsync();
         await pollerTask;
@@ -213,10 +213,20 @@ public class McServerTests
         {
             // reset by peer (unread bytes were pending when the server closed): also "closed, no answer"
         }
-        Assert.Contains(provider.Entries, e => e.EventId == Moz.Logging.CommLog.EventIds.MalformedFrame.Id);
+        await ExpectLogAsync(provider, e => e.EventId == Moz.Logging.CommLog.EventIds.MalformedFrame.Id);
 
         await cts.CancelAsync();
         await run;
+    }
+
+    /// <summary>Log lines are written after the response is sent, so give the server a moment before asserting on them.</summary>
+    private static async Task ExpectLogAsync(CapturingProvider provider, Predicate<CapturingProvider.Captured> predicate)
+    {
+        for (int i = 0; i < 50 && !provider.Entries.Exists(predicate); i++)
+        {
+            await Task.Delay(20);
+        }
+        Assert.Contains(provider.Entries, predicate);
     }
 
     private static McDevice Code(string code)

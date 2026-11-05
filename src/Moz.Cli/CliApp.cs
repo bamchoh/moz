@@ -8,6 +8,7 @@ using Moz.Devices;
 using Moz.Logging;
 using Moz.Fins;
 using Moz.Kv;
+using Moz.S7;
 using Moz.Mc;
 using Moz.Modbus.Client;
 using Moz.OpcUa;
@@ -232,6 +233,12 @@ public static class CliApp
                     device,
                     KvMap.Merge(device, s.Map.Select(m => KvMapOf(m, device))),
                     loggerFactory.CreateLogger($"moz.server.{s.Name}")),
+                "s7" => new S7TcpServer(
+                    s.Name,
+                    new IPEndPoint(IPAddress.Parse(s.Bind!), s.Port),
+                    device,
+                    S7Map.Merge(device, s.Map.Select(m => S7MapOf(m, device))),
+                    loggerFactory.CreateLogger($"moz.server.{s.Name}")),
                 "modbus-rtu" => new RtuServer(
                     s.Name,
                     OpenSerialPort(s.SerialPort!, s.Baud, s.Parity, s.DataBits, s.StopBits),
@@ -317,6 +324,16 @@ public static class CliApp
         }
         var table = LocalKinds.ToTable(m.Kind);
         return new McMap(dev, table, m.Offset, m.Count ?? device.Length(table) - m.Offset);
+    }
+
+    private static S7Map S7MapOf(ServerMapConfig m, IDeviceAccess device)
+    {
+        if (!S7Area.TryFromCode(m.Device, out var area))
+        {
+            throw new InvalidOperationException($"invalid S7 area \"{m.Device}\" (already rejected by config validation)");
+        }
+        var table = LocalKinds.ToTable(m.Kind);
+        return new S7Map(area, table, m.Offset, m.Count ?? device.Length(table) - m.Offset);
     }
 
     private static KvMap KvMapOf(ServerMapConfig m, IDeviceAccess device)

@@ -85,6 +85,6 @@ public class FinsConfigTests : IDisposable
     {
         var r = Load("fins-map-modbus.toml", Base.Replace("protocol = \"fins-tcp\"", "protocol = \"modbus-tcp\"").Replace("node = 10\n", ""));
         Assert.False(r.Ok);
-        Assert.Contains("server.map is only valid for mc-3e, fins and kv-hostlink servers", Messages(r));
+        Assert.Contains("server.map is only valid for mc-3e, fins, kv-hostlink and s7 servers", Messages(r));
     }
 }

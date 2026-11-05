@@ -202,6 +202,30 @@ public class CliTests : IDisposable
     }
 
     [Fact]
+    public async Task Validate_S7Server_Exits0()
+    {
+        const string toml =
+            """
+            [[device]]
+            name = "plc1"
+
+            [[server]]
+            name = "s7-a"
+            protocol = "s7"
+            device = "plc1"
+            port = 102
+
+            [[server.map]]
+            device = "M"
+            kind = "words"
+            offset = 10000
+            count = 256
+            """;
+        var exit = await Moz.Cli.CliApp.Run(["validate", WriteFile("s7-server.toml", toml)]);
+        Assert.Equal(0, exit);
+    }
+
+    [Fact]
     public async Task Validate_McClient_Exits0()
     {
         const string toml =

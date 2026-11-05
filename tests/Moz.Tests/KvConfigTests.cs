@@ -74,6 +74,6 @@ public class KvConfigTests : IDisposable
     {
         var r = Load("kv-map-modbus.toml", Base.Replace("protocol = \"kv-hostlink\"", "protocol = \"modbus-tcp\""));
         Assert.False(r.Ok);
-        Assert.Contains("server.map is only valid for mc-3e, fins and kv-hostlink servers", Messages(r));
+        Assert.Contains("server.map is only valid for mc-3e, fins, kv-hostlink and s7 servers", Messages(r));
     }
 }

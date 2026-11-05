@@ -121,7 +121,7 @@ value  = [{ speed = 10, on = true, label = "m0" }, { samples = [1.0, 2.0, 3.0, 4
 ```toml
 [[server]]
 name      = "sim-a"   # 必須、一意
-protocol  = "modbus-tcp"  # "modbus-tcp" | "modbus-rtu" | "opcua" | "mc-3e" | "fins-tcp" | "fins-udp" | "kv-hostlink" (opcua / mc-3e / fins / kv は後節)
+protocol  = "modbus-tcp"  # "modbus-tcp" | "modbus-rtu" | "opcua" | "mc-3e" | "fins-tcp" | "fins-udp" | "kv-hostlink" | "s7" (opcua / mc-3e / fins / kv / s7 は後節)
 device    = "plc-a"   # 参照する device 名 (未宣言名はエラー)
 bind      = "127.0.0.1"  # TCP。省略: 127.0.0.1
 port      = 50200     # TCP。省略: 50200。0 は ephemeral (テスト/CI 用)
@@ -209,6 +209,27 @@ count  = 1600             # 100 チャネル分 (省略: offset からテーブ�
 - 既定の割り当ては `DM → words 0..` と `R → bits 0..` (各テーブル全長)。他のデバイスは `[[server.map]]` が無ければ `E0`。同じコードを書けば既定を置き換える
 - 検証: デバイスが既知、`kind` の種別がデバイスに一致、範囲と重複は mc-3e と同じ。`node` は設定禁止 (fins 専用)
 - `unit_ids` は無視される。コマンド・書式・エラー応答は docs/spec-kv.md
+
+### Siemens S7 (s7) サーバ (フェーズ 22)
+
+```toml
+[[server]]
+name     = "s7-a"
+protocol = "s7"           # S7comm (S7-300/400 クラシック) over ISO-on-TCP (docs/spec-s7.md)
+device   = "plc-a"
+bind     = "127.0.0.1"    # 省略: 127.0.0.1
+port     = 102            # 省略: 50200 (実機は 102 なので明示する。Windows では 102 に管理者権限は不要)
+
+[[server.map]]            # S7 エリア → メモリの割り当て (省略可)
+device = "M"              # DB1..DB65535 | M | I (E) | Q (A)
+kind   = "words"          # words | read_only_words (S7 はバイト単位だがワードテーブルに写す: バイト b ↔ words[b/2])
+offset = 1000             # MB0 ↔ words[1000] の上位バイト、MW0 = words[1000]
+count  = 128              # 256 バイト分 (省略: offset からテーブルの残り全部)
+```
+
+- 既定の割り当ては `DB1 → words 0..` (テーブル全長) だけ。M / I / Q と他の DB は `[[server.map]]` が無ければ項目エラー 0A。`DB1` を書けば既定を置き換える
+- 検証: エリアが既知 (`DB0` や `T` はエラー)、`kind` がワードテーブル、範囲と重複は mc-3e と同じ。`node` は設定禁止 (fins 専用)
+- ラック / スロット (TSAP) は検査しないので、クライアント側はどの値でもよい。`unit_ids` は無視される。PDU・項目エラー・SZL は docs/spec-s7.md
 
 ## [[client]] — クライアント (マスタ): リモートスレーブのミラー
 
@@ -415,8 +436,8 @@ interval_ms = 500       # 100..3600000 (省略: 1000)
 | log.level | trace/debug/info/warn/error |
 | log.format | text/json |
 | server.parity | none/even/odd |
-| server.protocol | modbus-tcp / modbus-rtu / opcua / mc-3e / fins-tcp / fins-udp / kv-hostlink (他はエラー) |
-| server.map[].device | 既知の MC デバイスコード (英字のみ) / FINS エリア (DM, CIO, W, H, A, E0..E18) / KV デバイス (DM, EM, FM, W, ZF, R, MR, LR, B)、同一 server 内で一意; mc-3e / fins / kv-hostlink 以外では map 自体が禁止 |
+| server.protocol | modbus-tcp / modbus-rtu / opcua / mc-3e / fins-tcp / fins-udp / kv-hostlink / s7 (他はエラー) |
+| server.map[].device | 既知の MC デバイスコード (英字のみ) / FINS エリア (DM, CIO, W, H, A, E0..E18) / KV デバイス (DM, EM, FM, W, ZF, R, MR, LR, B) / S7 エリア (DB1..DB65535, M, I, Q)、同一 server 内で一意; mc-3e / fins / kv-hostlink / s7 以外では map 自体が禁止 |
 | server.node | 1 .. 254 (fins-tcp / fins-udp のみ; 省略: bind の末尾オクテット) |
 | server.map[].kind | bits / read_only_bits / words / read_only_words (デバイスの種別と一致) |
 | server.map[].offset + count | device の該当テーブル長以内 (count 省略時は残り全部、1 セル以上) |

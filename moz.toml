@@ -235,6 +235,22 @@ device = "MR"
 kind = "read_only_bits"
 offset = 0
 
+# Siemens S7 server (phase 22): plc-a as a CPU 315-2 PN/DP on port 102
+# (S7comm over ISO-on-TCP; any rack/slot). Default map: DB1 -> words; M below
+# maps flags onto words 800.. (MW0 = words[800], MB1 = its low byte).
+[[server]]
+name = "s7-a"
+protocol = "s7"
+device = "plc-a"
+bind = "127.0.0.1"
+port = 102
+
+[[server.map]]
+device = "M"
+kind = "words"
+offset = 800
+count = 100
+
 # OPC UA example (phase 7): publish the plc-a variables as nodes.
 # Nodes live under Objects/plc-ua (ns=urn:moz:ua:ns).
 [[server]]
