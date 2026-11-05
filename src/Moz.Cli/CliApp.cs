@@ -7,6 +7,7 @@ using Moz.Config;
 using Moz.Devices;
 using Moz.Logging;
 using Moz.Fins;
+using Moz.EtherNetIp;
 using Moz.Kv;
 using Moz.S7;
 using Moz.Mc;
@@ -232,6 +233,13 @@ public static class CliApp
                     new IPEndPoint(IPAddress.Parse(s.Bind!), s.Port),
                     device,
                     KvMap.Merge(device, s.Map.Select(m => KvMapOf(m, device))),
+                    loggerFactory.CreateLogger($"moz.server.{s.Name}")),
+                "enip" => new EnipServer(
+                    s.Name,
+                    new IPEndPoint(IPAddress.Parse(s.Bind!), s.Port),
+                    variableTables.TryGetValue(s.Device, out var enipVars)
+                        ? enipVars
+                        : new VariableTable(device, [], loggerFactory.CreateLogger($"moz.device.{s.Device}")),
                     loggerFactory.CreateLogger($"moz.server.{s.Name}")),
                 "s7" => new S7TcpServer(
                     s.Name,

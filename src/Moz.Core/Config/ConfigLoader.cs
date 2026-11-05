@@ -138,7 +138,7 @@ public static partial class ConfigLoader
 
     private static readonly string[] LogLevels = ["trace", "debug", "info", "warn", "error"];
     private static readonly string[] LogFormats = ["text", "json"];
-    private static readonly string[] Protocols = ["modbus-tcp", "modbus-rtu", "opcua", "mc-3e", "fins-tcp", "fins-udp", "kv-hostlink", "s7"];
+    private static readonly string[] Protocols = ["modbus-tcp", "modbus-rtu", "opcua", "mc-3e", "fins-tcp", "fins-udp", "kv-hostlink", "s7", "enip"];
     private static readonly string[] ClientProtocols = ["modbus-tcp", "modbus-rtu", "mc-3e", "opcua"];
 
     private static void Validate(MozConfig config, string path, List<ConfigError> errors)

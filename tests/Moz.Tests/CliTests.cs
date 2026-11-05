@@ -226,6 +226,31 @@ public class CliTests : IDisposable
     }
 
     [Fact]
+    public async Task Validate_EnipServer_Exits0()
+    {
+        const string toml =
+            """
+            [[device]]
+            name = "plc1"
+
+            [[variable]]
+            name = "temp"
+            device = "plc1"
+            kind = "words"
+            offset = 0
+            type = "real"
+
+            [[server]]
+            name = "enip-a"
+            protocol = "enip"
+            device = "plc1"
+            port = 44818
+            """;
+        var exit = await Moz.Cli.CliApp.Run(["validate", WriteFile("enip-server.toml", toml)]);
+        Assert.Equal(0, exit);
+    }
+
+    [Fact]
     public async Task Validate_McClient_Exits0()
     {
         const string toml =

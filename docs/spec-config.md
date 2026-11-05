@@ -121,7 +121,7 @@ value  = [{ speed = 10, on = true, label = "m0" }, { samples = [1.0, 2.0, 3.0, 4
 ```toml
 [[server]]
 name      = "sim-a"   # 必須、一意
-protocol  = "modbus-tcp"  # "modbus-tcp" | "modbus-rtu" | "opcua" | "mc-3e" | "fins-tcp" | "fins-udp" | "kv-hostlink" | "s7" (opcua / mc-3e / fins / kv / s7 は後節)
+protocol  = "modbus-tcp"  # "modbus-tcp" | "modbus-rtu" | "opcua" | "mc-3e" | "fins-tcp" | "fins-udp" | "kv-hostlink" | "s7" | "enip" (opcua / mc-3e / fins / kv / s7 / enip は後節)
 device    = "plc-a"   # 参照する device 名 (未宣言名はエラー)
 bind      = "127.0.0.1"  # TCP。省略: 127.0.0.1
 port      = 50200     # TCP。省略: 50200。0 は ephemeral (テスト/CI 用)
@@ -230,6 +230,20 @@ count  = 128              # 256 バイト分 (省略: offset からテーブル�
 - 既定の割り当ては `DB1 → words 0..` (テーブル全長) だけ。M / I / Q と他の DB は `[[server.map]]` が無ければ項目エラー 0A。`DB1` を書けば既定を置き換える
 - 検証: エリアが既知 (`DB0` や `T` はエラー)、`kind` がワードテーブル、範囲と重複は mc-3e と同じ。`node` は設定禁止 (fins 専用)
 - ラック / スロット (TSAP) は検査しないので、クライアント側はどの値でもよい。`unit_ids` は無視される。PDU・項目エラー・SZL は docs/spec-s7.md
+
+### EtherNet/IP (enip) タグサーバ (フェーズ 23)
+
+```toml
+[[server]]
+name     = "enip-a"
+protocol = "enip"         # EtherNet/IP 明示メッセージ、Logix 風のタグサーバ (docs/spec-enip.md)
+device   = "plc-a"        # この device の [[variable]] がそのままタグになる
+bind     = "127.0.0.1"    # 省略: 127.0.0.1
+port     = 44818          # 省略: 50200 (実機は 44818 なので明示する)
+```
+
+- `[[server.map]]` は無い (タグ = 変数)。変数が無い device でもサーバは立つ (タグ 0 個)
+- 型の対応、Forward Open、タグ一覧、エラーは docs/spec-enip.md。`unit_ids` は無視される
 
 ## [[client]] — クライアント (マスタ): リモートスレーブのミラー
 
@@ -436,7 +450,7 @@ interval_ms = 500       # 100..3600000 (省略: 1000)
 | log.level | trace/debug/info/warn/error |
 | log.format | text/json |
 | server.parity | none/even/odd |
-| server.protocol | modbus-tcp / modbus-rtu / opcua / mc-3e / fins-tcp / fins-udp / kv-hostlink / s7 (他はエラー) |
+| server.protocol | modbus-tcp / modbus-rtu / opcua / mc-3e / fins-tcp / fins-udp / kv-hostlink / s7 / enip (他はエラー) |
 | server.map[].device | 既知の MC デバイスコード (英字のみ) / FINS エリア (DM, CIO, W, H, A, E0..E18) / KV デバイス (DM, EM, FM, W, ZF, R, MR, LR, B) / S7 エリア (DB1..DB65535, M, I, Q)、同一 server 内で一意; mc-3e / fins / kv-hostlink / s7 以外では map 自体が禁止 |
 | server.node | 1 .. 254 (fins-tcp / fins-udp のみ; 省略: bind の末尾オクテット) |
 | server.map[].kind | bits / read_only_bits / words / read_only_words (デバイスの種別と一致) |

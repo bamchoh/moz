@@ -251,6 +251,15 @@ kind = "words"
 offset = 800
 count = 100
 
+# EtherNet/IP tag server (phase 23): the plc-a variables (temperature, ...)
+# as Logix-style tags on 44818. pycomm3: LogixDriver("127.0.0.1").read("temperature").
+[[server]]
+name = "enip-a"
+protocol = "enip"
+device = "plc-a"
+bind = "127.0.0.1"
+port = 44818
+
 # OPC UA example (phase 7): publish the plc-a variables as nodes.
 # Nodes live under Objects/plc-ua (ns=urn:moz:ua:ns).
 [[server]]
